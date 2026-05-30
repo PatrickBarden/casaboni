@@ -35,6 +35,15 @@ function normalizeText(text: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function toNameCase(value: string) {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function isGreeting(text: string) {
   const n = normalizeText(text).trim();
   const short = n.split(/\s+/).length <= 3;
@@ -64,6 +73,51 @@ function hasLeadIntent(text: string) {
   return /salvar|cadastro|cadastrar|contato|whatsapp/.test(normalizeText(text));
 }
 
+function hasExplorationIntent(text: string) {
+  const n = normalizeText(text);
+  const raw = text.toLowerCase();
+  return (
+    /nao sei bem|nao sei o que|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
+      n
+    ) || /n.o sei bem|n.o sei o que|duvid/.test(raw)
+  );
+}
+
+function hasUnknownAreaIntent(text: string) {
+  const n = normalizeText(text);
+  const raw = text.toLowerCase();
+  return (
+    /nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia|sem metragem|sem medida/.test(
+      n
+    ) || /n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw)
+  );
+}
+
+function extractStyle(text: string) {
+  const n = normalizeText(text);
+  if (/(amadeirad|madeira|aconcheg)/.test(n)) return "amadeirado";
+  if (/(moderno|minimal|clean|contemporane)/.test(n)) return "moderno";
+  if (/(claro|bege|off white|off-white|branco)/.test(n)) return "claro";
+  if (/(escuro|grafite|cinza|preto)/.test(n)) return "escuro";
+  if (/(rustic|rustico|natural)/.test(n)) return "rústico";
+  return "";
+}
+
+function extractAreaBand(text: string) {
+  const n = normalizeText(text);
+  const raw = text.toLowerCase();
+  if (/(pequen|ate 20|ate20|mini|compact)/.test(n)) return "pequeno";
+  if (/(medio|20 a 50|20-50|entre 20 e 50)/.test(n) || /m.{1,3}dio/.test(raw)) return "medio";
+  if (/(grand|acima de 50|mais de 50|50\+|amplo)/.test(n)) return "grande";
+  return "";
+}
+
+function parseAreaNumber(area: string) {
+  const match = area.match(/(\d{1,4})([.,]\d{1,2})?/);
+  if (!match) return 0;
+  return Number(match[0].replace(",", "."));
+}
+
 function detectCategory(text: string): ProductCategory | null {
   const n = normalizeText(text);
   if (n.includes("piso") || n.includes("vinil")) return "pisos";
@@ -82,6 +136,13 @@ function extractEnvironment(text: string) {
   if (n.includes("banheiro")) return "Banheiro";
   if (n.includes("area gourmet")) return "Área Gourmet";
   if (n.includes("comercial")) return "Comercial";
+  return "";
+}
+
+function extractPropertyType(text: string) {
+  const n = normalizeText(text);
+  if (n.includes("apartamento") || n.includes("apto")) return "apartamento";
+  if (n.includes("casa") || n.includes("sobrado")) return "casa";
   return "";
 }
 
@@ -109,7 +170,9 @@ function extractEmail(text: string) {
 
 function extractName(text: string) {
   const compact = text.replace(/\s+/g, " ").trim();
+  const normalized = normalizeText(compact);
   const patterns = [
+    /meu nome(?:\s+e|\s+eh|\s+é)?\s*[:\-]?\s*([\p{L}'\s]{3,80})/iu,
     /meu nome[^a-zA-Z0-9]{0,8}\s*([\p{L}'\s]{3,80})/iu,
     /\bnome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
   ];
@@ -118,11 +181,34 @@ function extractName(text: string) {
     const match = compact.match(pattern);
     if (!match) continue;
     const cleaned = match[1]
-      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|às|as|e meu|meu)\b/i)[0]
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|às|as|e meu|meu|zap)\b/i)[0]
       .replace(/[,.!?]+$/g, "")
       .trim();
 
-    if (cleaned.length >= 3) return cleaned;
+    if (cleaned.length >= 3) return toNameCase(cleaned);
+  }
+
+  const fallback = normalized.match(/(?:meu nome|nome)\s*(?:e|eh)?\s*([a-z\s]{3,80})/i);
+  if (fallback?.[1]) {
+    return toNameCase(
+      fallback[1]
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|as|e meu|meu|zap)\b/i)[0]
+      .replace(/[,.!?]+$/g, "")
+      .trim()
+    );
+  }
+
+  const loose = normalized
+    .replace(/[^a-z0-9\s]/g, " ")
+    .match(/meu nome\s+([a-z\s]{3,80})/i);
+  if (loose?.[1]) {
+    return toNameCase(
+      loose[1]
+      .replace(/^(e|eh|a|o)\s+/i, "")
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|as|e meu|meu|zap)\b/i)[0]
+      .replace(/[,.!?]+$/g, "")
+      .trim()
+    );
   }
 
   return "";
@@ -176,6 +262,7 @@ function buildMediaFromCatalog(entries: CatalogEntry[]): ChatMedia[] {
 function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
   const normalized = normalizeText(message);
   const models = ["veneza", "verona", "florenca", "londres", "rio de janeiro", "washington"];
+  const wantsPortfolio = /portfolio|portifolio|catalogo|inspiracao|inspirar/.test(normalized);
 
   const matchedModel = models.find((m) => normalized.includes(m));
   if (matchedModel) {
@@ -187,6 +274,23 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
 
   const category = detectCategory(message);
   if (!category) {
+    if (wantsPortfolio) {
+      const selected = catalog
+        .filter((item) => {
+          const label = normalizeText(item.label);
+          return models.some((m) => label.includes(m)) || label.includes("rodape");
+        })
+        .slice(0, 6);
+
+      return {
+        reply:
+          selected.length > 0
+            ? "Claro. Separei um recorte visual do portfólio para você folhear primeiro. Depois me diga qual ambiente você quer renovar."
+            : "Claro. Posso te guiar pelo portfólio; hoje temos pisos, rodapés, telhas shingle e ripados. Qual ambiente você quer renovar?",
+        selected,
+      };
+    }
+
     return {
       reply: "Tenho fotos de pisos, rodapés, telhas shingle e ripados. Qual produto você quer ver primeiro?",
       selected: [],
@@ -222,7 +326,14 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
 async function fetchRagContext(message: string, customerContext?: string) {
   const webhook = (process.env.N8N_RAG_WEBHOOK_URL || "").trim();
   const driveFolderId = (process.env.N8N_DRIVE_FOLDER_ID || "").trim();
-  if (!webhook || !driveFolderId) return { driveCatalog: [] as string[] };
+  if (!webhook || !driveFolderId) {
+    return {
+      driveCatalog: [] as string[],
+      ragPromptContext: "",
+      systemHints: [] as string[],
+      playbookLoaded: false,
+    };
+  }
 
   try {
     const response = await fetch(webhook, {
@@ -230,11 +341,28 @@ async function fetchRagContext(message: string, customerContext?: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, question: message, driveFolderId, customerContext: customerContext || "" }),
     });
-    if (!response.ok) return { driveCatalog: [] as string[] };
+    if (!response.ok) {
+      return {
+        driveCatalog: [] as string[],
+        ragPromptContext: "",
+        systemHints: [] as string[],
+        playbookLoaded: false,
+      };
+    }
     const data = await response.json();
-    return { driveCatalog: Array.isArray(data?.driveCatalog) ? data.driveCatalog : [] };
+    return {
+      driveCatalog: Array.isArray(data?.driveCatalog) ? data.driveCatalog : [],
+      ragPromptContext: typeof data?.ragPromptContext === "string" ? data.ragPromptContext : "",
+      systemHints: Array.isArray(data?.systemHints) ? data.systemHints : [],
+      playbookLoaded: Boolean(data?.playbookLoaded),
+    };
   } catch {
-    return { driveCatalog: [] as string[] };
+    return {
+      driveCatalog: [] as string[],
+      ragPromptContext: "",
+      systemHints: [] as string[],
+      playbookLoaded: false,
+    };
   }
 }
 
@@ -244,42 +372,106 @@ function contextFromHistory(history: ChatMessage[]) {
     .slice(-6)
     .map((m) => m.text)
     .join(" ");
+  const lastBotText = history
+    .filter((m) => m.role === "bot")
+    .slice(-3)
+    .map((m) => m.text)
+    .join(" ");
 
   return {
     category: detectCategory(lastUserText),
     environment: extractEnvironment(lastUserText),
+    propertyType: extractPropertyType(lastUserText),
     area: extractArea(lastUserText),
-    greeted: history.some((m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")),
+    areaBand: extractAreaBand(lastUserText),
+    style: extractStyle(lastUserText),
+    botAskedArea: /metragem|m²|m2/.test(normalizeText(lastBotText)),
+    botEnvironment: extractEnvironment(lastBotText),
+    greeted: history.some(
+      (m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")
+    ),
   };
 }
 
 function buildGuidedReply(message: string, history: ChatMessage[]) {
   const historyCtx = contextFromHistory(history);
   const category = detectCategory(message) || historyCtx.category;
-  const environment = extractEnvironment(message) || historyCtx.environment;
+  const environment = extractEnvironment(message) || historyCtx.environment || historyCtx.botEnvironment;
+  const propertyType = extractPropertyType(message) || historyCtx.propertyType;
   const area = extractArea(message) || historyCtx.area;
+  const areaBand = extractAreaBand(message) || historyCtx.areaBand;
+  const style = extractStyle(message) || historyCtx.style;
+  const areaNumber = parseAreaNumber(area);
+  const likelyAreaTypingMistake =
+    !!area &&
+    areaNumber > 0 &&
+    areaNumber < 10 &&
+    /(sala|quarto|cozinha|comercial|apartamento|casa)/.test(normalizeText(environment || message));
 
   if (isGreeting(message)) {
     if (historyCtx.greeted) {
       if (!category) return "Perfeito. Para eu te atender melhor, você quer ver pisos, rodapés, telhas ou ripados?";
       if (!environment) return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
-      if (!area) return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+      if (!area) return "Sem problema se você não tiver a metragem exata. Podemos seguir por faixa: pequeno, médio ou grande.";
       return "Perfeito. Me diga o próximo detalhe que você quer analisar e eu te ajudo a decidir.";
     }
-    return "Olá! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapés, telhas ou ripados. Qual categoria você quer analisar primeiro?";
+    return "Olá! Sou o Consultor Casaboni. Estou aqui para te atender e te ajudar a escolher a melhor solução para seu ambiente. Qual espaço você quer transformar hoje?";
   }
 
   if (isPriceIntent(message) && !category) {
     return "Consigo te orientar com orçamento, sim. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
   }
 
+  if (hasExplorationIntent(message) && !category) {
+    return "Super normal ter essa dúvida, e eu te ajudo sem pressa. Se quiser, eu te mostro um resumo visual do portfólio primeiro; antes disso, me diz: é casa ou apartamento?";
+  }
+
+  if (propertyType && !category && !environment) {
+    return `Perfeito, ${propertyType}. Qual ambiente você mais usa no dia a dia e quer renovar primeiro? Se preferir, também te mostro um recorte do portfólio para inspirar.`;
+  }
+
+  if (hasUnknownAreaIntent(message) && (historyCtx.botAskedArea || (category && environment && !area))) {
+    return "Sem problema. Podemos seguir sem medida exata: me diga se esse ambiente é pequeno, médio ou grande que eu já te indico opções certeiras.";
+  }
+
+  if (!category && environment && !area) {
+    return `Perfeito, ${environment}. Para eu te indicar com precisão, você quer pisos, rodapés, telhas shingle ou ripados?`;
+  }
+
+  if (area && environment && !category) {
+    return `Perfeito, ${environment} com ${area}. Para eu te indicar com precisão, você quer pisos, rodapés, telhas shingle ou ripados?`;
+  }
+
+  if (area && !environment && category) {
+    return `Perfeito, já anotei ${area}. Para ${category}, qual ambiente você quer transformar?`;
+  }
+
   if (category && !environment) return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
-  if (category && environment && !area) return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
-  if (category && environment && area) return `Perfeito, para ${environment} com ${area}. Se quiser, já te mostro a linha ideal para esse contexto.`;
+  if (category && environment && !area) {
+    if (areaBand) {
+      const bandLabel = areaBand === "medio" ? "médio" : areaBand;
+      if (!style) {
+        return `Perfeito, ${environment} de porte ${bandLabel}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
+      }
+      return `Excelente. Para ${environment} de porte ${bandLabel} e estilo ${style}, já consigo separar opções mais alinhadas para você.`;
+    }
+    if (hasUnknownAreaIntent(message)) {
+      return "Sem problema. Podemos começar sem metragem exata. Me diga se o ambiente é pequeno, médio ou grande que eu já te indico opções mais assertivas.";
+    }
+    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+  }
+  if (category && environment && area) {
+    if (likelyAreaTypingMistake) {
+      return `Perfeito, ${environment}. Só confirmando para eu não errar na indicação: são ${area} mesmo ou seria ${areaNumber}0m²?`;
+    }
+    if (!style) {
+      return `Perfeito, ${environment} com ${area}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
+    }
+    return `Excelente. Para ${environment} com ${area} e estilo ${style}, já consigo separar opções mais alinhadas para você.`;
+  }
 
   return null;
 }
-
 function sanitizeReply(text: string) {
   const clean = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
   if (!clean) return "Pode repetir, por favor?";
@@ -412,6 +604,8 @@ export default async function handler(req: any, res: any) {
       .join("\n");
 
     const ragCatalogCompact = catalog.slice(0, 20).map((c) => `- ${c.label}`).join("\n");
+    const ragPromptContext = String(rag.ragPromptContext || "").slice(0, 12000);
+    const ragHints = Array.isArray(rag.systemHints) ? rag.systemHints.slice(0, 20) : [];
     const response = await ai.models.generateContent({
       model: (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim(),
       config: {
@@ -461,11 +655,20 @@ export default async function handler(req: any, res: any) {
         "- Se faltar dado, faça apenas 1 pergunta objetiva por vez.",
         "- Mantenha continuidade com o histórico e evite mudar de assunto.",
         "- Respostas curtas (até 3 frases), em pt-BR, tom profissional e amigável.",
-        "- Antes de listar produtos, confirme categoria/ambiente/metragem.",
+        "- Se o cliente estiver indeciso, acolha e converse antes de qualificar (ex.: casa/apartamento, estilo de vida, ambiente de maior uso).",
+        "- Ofereça opcionalmente um resumo do portfólio antes de pedir muitos dados técnicos.",
+        "- Se o cliente não souber metragem, ofereça alternativa por faixa (pequeno/médio/grande).",
+        "- Antes de listar produtos, confirme categoria, ambiente e estilo.",
         "- Produtos Casaboni: pisos, rodapés, telhas shingle e ripados.",
         "",
         "Catálogo disponível:",
         ragCatalogCompact || "- Catálogo não carregado nesta requisição.",
+        "",
+        rag.playbookLoaded
+          ? "Manual oficial do consultor carregado do Drive nesta requisição."
+          : "Manual oficial do consultor não carregado nesta requisição.",
+        ragHints.length ? `Diretrizes RAG resumidas:\n${ragHints.map((h) => `- ${h}`).join("\n")}` : "",
+        ragPromptContext ? `Contexto RAG completo:\n${ragPromptContext}` : "",
         "",
         conversation,
       ].join("\n"),
@@ -492,8 +695,11 @@ export default async function handler(req: any, res: any) {
     res.status(200).json({ ok: true, reply: sanitizeReply(response.text), media: [] });
   } catch {
     const message = String(req.body?.message || "").trim();
+    const exploratoryFallback = hasExplorationIntent(message);
     const fallbackReply = message
-      ? "Estou aqui para te ajudar com a escolha do produto ideal. Me diga ambiente, metragem e categoria."
+      ? exploratoryFallback
+        ? "Perfeito, eu te ajudo com calma. Se quiser, começamos com uma visão rápida do portfólio; me diz só se é casa ou apartamento."
+        : "Estou aqui para te atender e te ajudar a escolher o produto ideal. Qual ambiente você quer renovar primeiro?"
       : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
 
     res.status(200).json({ ok: true, reply: fallbackReply, media: [] });

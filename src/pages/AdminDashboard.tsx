@@ -190,6 +190,9 @@ export default function AdminDashboard() {
           <Link to="/admin" className="flex items-center gap-3 p-3 bg-white/10 rounded-lg text-sm font-medium">
             <LayoutDashboard className="w-5 h-5" /> Dashboard
           </Link>
+          <Link to="/admin/leads" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
+            <Users className="w-5 h-5" /> Leads
+          </Link>
           <Link to="/admin/meetings" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
             <Calendar className="w-5 h-5" /> Reuniões
           </Link>

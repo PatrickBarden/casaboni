@@ -5,6 +5,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminProducts from "./pages/AdminProducts";
 import AdminMeetings from "./pages/AdminMeetings";
 import AdminUsers from "./pages/AdminUsers";
+import AdminLeads from "./pages/AdminLeads";
 import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
 import TermsPage from "./pages/TermsPage";
 import SustainabilityPage from "./pages/SustainabilityPage";
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/success" element={<SuccessPage />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/leads" element={<AdminLeads />} />
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/meetings" element={<AdminMeetings />} />
           <Route path="/admin/users" element={<AdminUsers />} />

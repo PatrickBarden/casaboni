@@ -2,12 +2,16 @@ export interface Lead {
   id: string;
   name: string;
   phone: string;
+  email?: string;
   city: string;
   product: string;
   environment: string;
   area: string;
   date: string;
   status: string;
+  source?: string;
+  notes?: string;
+  createdAt?: any;
 }
 
 export interface Product {

@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -39,7 +39,7 @@ function isPhotoIntent(text: string) {
     normalized.includes("fotos") ||
     normalized.includes("imagem") ||
     normalized.includes("imagens") ||
-    normalized.includes("catálogo") ||
+    normalized.includes("catÃ¡logo") ||
     normalized.includes("portifolio") ||
     normalized.includes("portfolio")
   );
@@ -50,6 +50,15 @@ function normalizeText(text: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function toNameCase(value: string) {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function parseCatalogEntries(lines: string[]): CatalogEntry[] {
@@ -142,17 +151,18 @@ function isPhotoFollowUpSelection(history: ChatMessage[], message: string) {
 
 function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
   const normalized = normalizeText(message);
+  const wantsPortfolio = /portfolio|portifolio|catalogo|inspiracao|inspirar/.test(normalized);
   const askClarification = {
     mode: "clarify" as const,
     reply:
-      "Tenho fotos de pisos, rodapés, telhas shingle e ripados. Qual produto você quer ver primeiro?",
+      "Tenho fotos de pisos, rodapÃ©s, telhas shingle e ripados. Qual produto vocÃª quer ver primeiro?",
   };
 
   if (!catalog.length) {
     return {
       mode: "empty" as const,
       reply:
-        "Ainda não encontrei imagens no catálogo do Drive. Posso te enviar o portfólio geral enquanto isso?",
+        "Ainda nÃ£o encontrei imagens no catÃ¡logo do Drive. Posso te enviar o portfÃ³lio geral enquanto isso?",
     };
   }
 
@@ -164,7 +174,7 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
       ? { mode: "selected" as const, selected, intro: `Perfeito! Separei as fotos da linha ${matchedModel}.` }
       : {
           mode: "none" as const,
-          reply: `Não encontrei foto da linha ${matchedModel} no Drive agora. Posso te mandar as linhas mais próximas disponíveis?`,
+          reply: `NÃ£o encontrei foto da linha ${matchedModel} no Drive agora. Posso te mandar as linhas mais prÃ³ximas disponÃ­veis?`,
         };
   }
 
@@ -175,6 +185,24 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
 
   const hasAnyCategory = wantsPisos || wantsRodape || wantsTelha || wantsRipado;
   if (!hasAnyCategory) {
+    if (wantsPortfolio) {
+      const selected = catalog
+        .filter((item) => {
+          const label = normalizeText(item.label);
+          return models.some((m) => label.includes(m)) || label.includes("rodape");
+        })
+        .slice(0, 6);
+
+      return selected.length
+        ? {
+            mode: "selected" as const,
+            selected,
+            intro:
+              "Claro. Separei um recorte visual do portfolio para voce folhear primeiro. Depois me diga qual ambiente voce quer renovar.",
+          }
+        : askClarification;
+    }
+
     return askClarification;
   }
 
@@ -197,14 +225,14 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
     return {
       mode: "none" as const,
       reply:
-        "Não achei foto específica dessa categoria no Drive agora. Posso te enviar o portfólio completo e te orientar pela linha ideal.",
+        "NÃ£o achei foto especÃ­fica dessa categoria no Drive agora. Posso te enviar o portfÃ³lio completo e te orientar pela linha ideal.",
     };
   }
 
   return {
     mode: "selected" as const,
     selected: dedup.slice(0, 6),
-    intro: "Perfeito! Separei as fotos do produto que você pediu.",
+    intro: "Perfeito! Separei as fotos do produto que vocÃª pediu.",
   };
 }
 
@@ -216,10 +244,14 @@ function buildQuotaFallbackReply(message: string, rag: { driveCatalog: string[] 
     return picked.reply;
   }
 
+  if (hasExplorationIntent(message)) {
+    return "Super normal ter essa duvida. Se quiser, comecamos com um panorama rapido do portfolio e eu te guio sem pressa. E para casa ou apartamento?";
+  }
+
   return [
-    "A Casaboni trabalha com portfólio completo de acabamentos, não apenas pisos.",
-    "Hoje atuamos com pisos vinílicos clicados, rodapés de poliestireno, telhas shingle e ripados WPC.",
-    "Para te orientar melhor, qual ambiente você quer transformar e qual dessas categorias te interessa primeiro?",
+    "A Casaboni trabalha com portfÃ³lio completo de acabamentos, nÃ£o apenas pisos.",
+    "Hoje atuamos com pisos vinÃ­licos clicados, rodapÃ©s de poliestireno, telhas shingle e ripados WPC.",
+    "Para te orientar melhor, qual ambiente vocÃª quer transformar e qual dessas categorias te interessa primeiro?",
   ].join(" ");
 }
 
@@ -273,9 +305,14 @@ Seu estilo:
 1. Curto e direto (2-3 frases na maioria dos casos).
 2. Conversa consultiva: fazer uma pergunta por vez para orientar a escolha.
 3. Texto simples, sem excesso de formatacao.
-4. Se o cliente pedir fotos/imagens/catálogo, nunca despejar todo o catálogo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
-5. Nunca limitar atendimento apenas a pisos.
-6. Falar sempre em portugues do Brasil (pt-BR) e considerar horario de Brasilia (America/Sao_Paulo) para saudacoes.
+4. Entre na conversa com naturalidade, seja cordial e demonstre interesse real pelo cliente.
+5. Sempre mantenha contexto do que o cliente ja respondeu; nunca repetir pergunta sem necessidade.
+6. Se o cliente nao souber a metragem, ofereca caminho alternativo (faixa de tamanho: pequeno/medio/grande) e continue o atendimento.
+7. Depois de entender necessidade, indique opcoes de forma filtrada (1 a 3 opcoes), nao lista extensa.
+8. Em momento oportuno, colete nome e WhatsApp de forma sutil para continuar o atendimento.
+9. Se o cliente pedir fotos/imagens/catÃ¡logo, nunca despejar todo o catÃ¡logo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
+10. Nunca limitar atendimento apenas a pisos.
+11. Falar sempre em portugues do Brasil (pt-BR) e considerar horario de Brasilia (America/Sao_Paulo) para saudacoes.
 
 Objetivos:
 - Posicionar a Casaboni como consultoria comercial de ambientes.
@@ -384,18 +421,48 @@ function extractEmail(text: string) {
 }
 
 function extractName(text: string) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const normalized = normalizeText(compact);
   const patterns = [
-    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([\p{L}'\s]{3,80})/iu,
-    /nome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
+    /meu nome(?:\s+e|\s+eh|\s+é)?\s*[:\-]?\s*([\p{L}'\s]{3,80})/iu,
+    /\bnome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
   ];
+
   for (const pattern of patterns) {
-    const match = text.match(pattern);
+    const match = compact.match(pattern);
     if (!match) continue;
-    return match[1].split(/[,.!?\n]/)[0].trim();
+    const cleaned = match[1]
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|às|as|e meu|meu|zap)\b/i)[0]
+      .split(/[,.!?\n]/)[0]
+      .trim();
+    if (cleaned.length >= 3) return toNameCase(cleaned);
   }
+
+  const fallback = normalized.match(/(?:meu nome|nome)\s*(?:e|eh)?\s*([a-z\s]{3,80})/i);
+  if (fallback?.[1]) {
+    return toNameCase(
+      fallback[1]
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|as|e meu|meu|zap)\b/i)[0]
+      .split(/[,.!?\n]/)[0]
+      .trim()
+    );
+  }
+
+  const loose = normalized
+    .replace(/[^a-z0-9\s]/g, " ")
+    .match(/meu nome\s+([a-z\s]{3,80})/i);
+  if (loose?.[1]) {
+    return toNameCase(
+      loose[1]
+      .replace(/^(e|eh|a|o)\s+/i, "")
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|as|e meu|meu|zap)\b/i)[0]
+      .split(/[,.!?\n]/)[0]
+      .trim()
+    );
+  }
+
   return "";
 }
-
 function extractDate(text: string) {
   const iso = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
   if (iso) return iso[1];
@@ -425,8 +492,15 @@ function extractEnvironment(text: string) {
   return "";
 }
 
+function extractPropertyType(text: string) {
+  const normalized = normalizeText(text);
+  if (normalized.includes("apartamento") || normalized.includes("apto")) return "apartamento";
+  if (normalized.includes("casa") || normalized.includes("sobrado")) return "casa";
+  return "";
+}
+
 function hasMeetingIntent(text: string) {
-  return /agendar|reuniao|reunião|consultoria/.test(text.toLowerCase());
+  return /agendar|reuniao|reuniao|consultoria/.test(text.toLowerCase());
 }
 
 function hasLeadIntent(text: string) {
@@ -451,17 +525,63 @@ function isGreeting(text: string) {
 }
 
 function hasPriceIntent(text: string) {
-  return /preco|valor|orcamento|orçamento|quanto custa|preço/.test(normalizeText(text));
+  return /preco|valor|orcamento|orÃ§amento|quanto custa|preÃ§o/.test(normalizeText(text));
+}
+
+function hasExplorationIntent(text: string) {
+  const normalized = normalizeText(text);
+  const raw = text.toLowerCase();
+  return (
+    /nao sei bem|nao sei o que|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
+      normalized
+    ) || /n.o sei bem|n.o sei o que|duvid/.test(raw)
+  );
+}
+
+function hasUnknownAreaIntent(text: string) {
+  const normalized = normalizeText(text);
+  const raw = text.toLowerCase();
+  return (
+    /nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia|sem metragem|sem medida/.test(
+      normalized
+    ) || /n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw)
+  );
+}
+
+function extractStyle(text: string) {
+  const normalized = normalizeText(text);
+  if (/(amadeirad|madeira|aconcheg)/.test(normalized)) return "amadeirado";
+  if (/(moderno|minimal|clean|contemporane)/.test(normalized)) return "moderno";
+  if (/(claro|bege|off white|off-white|branco)/.test(normalized)) return "claro";
+  if (/(escuro|grafite|cinza|preto)/.test(normalized)) return "escuro";
+  if (/(rustic|rÃºstic|natural)/.test(normalized)) return "rÃºstico";
+  return "";
+}
+
+function extractAreaBand(text: string) {
+  const normalized = normalizeText(text);
+  const raw = text.toLowerCase();
+  if (/(pequen|ate 20|ate20|mini|compact)/.test(normalized)) return "pequeno";
+  if (/(medio|20 a 50|20-50|entre 20 e 50)/.test(normalized) || /m.{1,3}dio/.test(raw))
+    return "medio";
+  if (/(grand|acima de 50|mais de 50|50\+|amplo)/.test(normalized)) return "grande";
+  return "";
+}
+
+function parseAreaNumber(area: string) {
+  const match = area.match(/(\d{1,4})([.,]\d{1,2})?/);
+  if (!match) return 0;
+  return Number(match[0].replace(",", "."));
 }
 
 function extractArea(text: string) {
   const normalized = normalizeText(text).trim();
   const directNumber = normalized.match(/^(\d{1,4})([.,]\d{1,2})?$/);
-  if (directNumber) return `${directNumber[1]}m²`;
+  if (directNumber) return `${directNumber[1]}mÂ²`;
 
-  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|m²|m|metros?|metro)\b/i);
+  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|mÂ²|m|metros?|metro)\b/i);
   if (!match) return "";
-  return `${match[1]}m²`;
+  return `${match[1]}mÂ²`;
 }
 
 function summarizeUserHistory(history: ChatMessage[]) {
@@ -470,37 +590,104 @@ function summarizeUserHistory(history: ChatMessage[]) {
     .slice(-6)
     .map((m) => m.text)
     .join(" ");
+  const lastBotText = history
+    .filter((m) => m.role === "bot")
+    .slice(-3)
+    .map((m) => m.text)
+    .join(" ");
+
   return {
     category: detectCategory(text),
     environment: extractEnvironment(text),
+    propertyType: extractPropertyType(text),
     area: extractArea(text),
+    areaBand: extractAreaBand(text),
+    style: extractStyle(text),
+    botAskedArea: /metragem|mÂ²|m2/.test(normalizeText(lastBotText)),
+    botEnvironment: extractEnvironment(lastBotText),
+    greeted: history.some(
+      (m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")
+    ),
   };
 }
 
 function buildGuidedConsultingReply(message: string, history: ChatMessage[]) {
   const hist = summarizeUserHistory(history);
   const category = detectCategory(message) || hist.category;
-  const environment = extractEnvironment(message) || hist.environment;
+  const environment = extractEnvironment(message) || hist.environment || hist.botEnvironment;
+  const propertyType = extractPropertyType(message) || hist.propertyType;
   const area = extractArea(message) || hist.area;
+  const areaBand = extractAreaBand(message) || hist.areaBand;
+  const style = extractStyle(message) || hist.style;
+  const areaNumber = parseAreaNumber(area);
+  const messageNormalized = normalizeText(message);
+  const likelyAreaTypingMistake =
+    !!area &&
+    areaNumber > 0 &&
+    areaNumber < 10 &&
+    /(sala|quarto|cozinha|comercial|apartamento|casa)/.test(normalizeText(environment || message));
 
   if (isGreeting(message)) {
-    return "Olá! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapés, telhas ou ripados. Qual categoria você quer analisar primeiro?";
+    if (hist.greeted && category && environment && !area) {
+      return "Perfeito, seguimos juntos. Se vocÃª nÃ£o tiver a metragem exata, eu te ajudo por faixa: atÃ© 20mÂ², 20 a 50mÂ² ou acima de 50mÂ².";
+    }
+    return "OlÃ¡! Sou o Consultor Casaboni. Estou aqui para te atender e te ajudar a escolher a melhor soluÃ§Ã£o para seu ambiente. Qual espaÃ§o vocÃª quer transformar hoje?";
   }
 
   if (hasPriceIntent(message) && !category) {
-    return "Consigo te orientar com orçamento. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
+    return "Consigo te orientar com orÃ§amento. Primeiro me diga a categoria: pisos, rodapÃ©s, telhas ou ripados.";
+  }
+
+  if (hasExplorationIntent(message) && !category) {
+    return "Super normal ter essa duvida, e eu te ajudo sem pressa. Se quiser, eu te mostro um resumo visual do portfolio primeiro; antes disso, me diz: e para casa ou apartamento?";
+  }
+
+  if (propertyType && !category && !environment) {
+    return `Perfeito, ${propertyType}. Qual ambiente voce mais usa no dia a dia e quer renovar primeiro? Se preferir, tambem te mostro um recorte do portfolio para inspirar.`;
+  }
+
+  if (hasUnknownAreaIntent(message) && (hist.botAskedArea || (category && environment && !area))) {
+    return "Sem problema. Podemos seguir sem medida exata: me diga se esse ambiente Ã© pequeno, mÃ©dio ou grande que eu jÃ¡ te indico opÃ§Ãµes certeiras.";
+  }
+
+  if (!category && environment && !area) {
+    return `Perfeito, ${environment}. Para eu te indicar com precisÃ£o, vocÃª quer pisos, rodapÃ©s, telhas shingle ou ripados?`;
+  }
+
+  if (area && environment && !category) {
+    return `Perfeito, ${environment} com ${area}. Para eu te indicar com precisÃ£o, vocÃª quer pisos, rodapÃ©s, telhas shingle ou ripados?`;
+  }
+
+  if (area && !environment && category) {
+    return `Perfeito, jÃ¡ anotei ${area}. Para ${category}, qual ambiente vocÃª quer transformar?`;
   }
 
   if (category && !environment) {
-    return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
+    return `Perfeito. Para ${category}, qual ambiente vocÃª quer transformar?`;
   }
 
   if (category && environment && !area) {
-    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+    if (areaBand) {
+      const bandLabel = areaBand === "medio" ? "mÃ©dio" : areaBand;
+      if (!style) {
+        return `Perfeito, ${environment} de porte ${bandLabel}. VocÃª prefere um visual mais claro, amadeirado, moderno ou rÃºstico?`;
+      }
+      return `Excelente. Para ${environment} de porte ${bandLabel} e estilo ${style}, eu jÃ¡ consigo te mostrar opÃ§Ãµes mais alinhadas e o prÃ³ximo passo de orÃ§amento.`;
+    }
+    if (hasUnknownAreaIntent(message) || /nao lembro|nao sei|sem metragem/.test(messageNormalized)) {
+      return "Sem problema. Podemos comeÃ§ar sem a metragem exata. Me diga se o ambiente Ã© pequeno, mÃ©dio ou grande que eu jÃ¡ te indico opÃ§Ãµes mais assertivas.";
+    }
+    return `Ã“timo, ${environment}. Qual a metragem aproximada em mÂ² para eu te orientar com mais precisÃ£o?`;
   }
 
   if (category && environment && area) {
-    return `Perfeito, para ${environment} com ${area}. Agora eu te mostro as opções mais adequadas dessa linha.`;
+    if (likelyAreaTypingMistake) {
+      return `Perfeito, ${environment}. SÃ³ confirmando para eu nÃ£o errar na indicaÃ§Ã£o: sÃ£o ${area} mesmo ou seria ${areaNumber}0mÂ²?`;
+    }
+    if (!style) {
+      return `Perfeito, ${environment} com ${area}. VocÃª prefere um visual mais claro, amadeirado, moderno ou rÃºstico?`;
+    }
+    return `Excelente. Para ${environment} com ${area} e estilo ${style}, eu jÃ¡ consigo te mostrar as opÃ§Ãµes mais alinhadas e o prÃ³ximo passo de orÃ§amento.`;
   }
 
   return "";
@@ -563,17 +750,6 @@ export async function chatWithGemini(input: {
     };
   }
 
-  const guidedReply = buildGuidedConsultingReply(input.message, input.history);
-  if (guidedReply) {
-    return {
-      reply: guidedReply,
-      rag: {
-        filesFound: ragContext.filesFound,
-        driveCatalog: ragContext.driveCatalog,
-      },
-    };
-  }
-
   // Deterministic CRM fallback to ensure automatic capture even when model tool-calling fails.
   const maybeName = extractName(input.message);
   const maybePhone = extractPhone(input.message);
@@ -589,13 +765,13 @@ export async function chatWithGemini(input: {
         phone: maybePhone,
         date: maybeDate,
         time: maybeTime,
-        topic: "Consultoria Técnica",
+        topic: "Consultoria TÃ©cnica",
       });
     } catch (error) {
       console.error("Deterministic scheduleMeeting fallback error:", error);
     }
     return {
-      reply: `Perfeito, ${maybeName}. Reunião agendada para ${maybeDate} às ${maybeTime}. Se quiser, já me diga o ambiente e a metragem para adiantarmos a consultoria.`,
+      reply: `Perfeito, ${maybeName}. reuniao agendada para ${maybeDate} Ã s ${maybeTime}. Se quiser, jÃ¡ me diga o ambiente e a metragem para adiantarmos a consultoria.`,
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -603,7 +779,7 @@ export async function chatWithGemini(input: {
     };
   }
 
-  if (hasLeadIntent(input.message) && maybeName && maybePhone) {
+  if ((hasLeadIntent(input.message) || maybePhone) && maybeName && maybePhone) {
     try {
       await saveLead({
         name: maybeName,
@@ -615,7 +791,29 @@ export async function chatWithGemini(input: {
       console.error("Deterministic saveLead fallback error:", error);
     }
     return {
-      reply: `Perfeito, ${maybeName}. Seus dados já foram cadastrados com sucesso. Para eu te indicar a melhor linha, qual ambiente você quer transformar?`,
+      reply: `Perfeito, ${maybeName}. Seus dados jÃ¡ foram cadastrados com sucesso. Para eu te indicar a melhor linha, qual ambiente vocÃª quer transformar?`,
+      rag: {
+        filesFound: ragContext.filesFound,
+        driveCatalog: ragContext.driveCatalog,
+      },
+    };
+  }
+
+  if ((hasLeadIntent(input.message) || maybePhone) && (!maybeName || !maybePhone)) {
+    const missingLead = !maybeName ? "nome completo" : "telefone/WhatsApp";
+    return {
+      reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`,
+      rag: {
+        filesFound: ragContext.filesFound,
+        driveCatalog: ragContext.driveCatalog,
+      },
+    };
+  }
+
+  const guidedReply = buildGuidedConsultingReply(input.message, input.history);
+  if (guidedReply) {
+    return {
+      reply: guidedReply,
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -644,7 +842,7 @@ export async function chatWithGemini(input: {
         maxOutputTokens: 320,
         systemInstruction:
           BASE_SYSTEM_INSTRUCTION +
-          "\n\nRegras de resposta obrigatórias: nunca inventar produto/preço/prazo, manter continuidade com histórico e fazer apenas 1 pergunta por vez quando faltar contexto." +
+          "\n\nRegras de resposta obrigatÃ³rias: nunca inventar produto/preÃ§o/prazo, manter continuidade com histÃ³rico e fazer apenas 1 pergunta por vez quando faltar contexto." +
           (ragContext.ragPromptContext
             ? `\n\nContexto RAG do Drive:\n${ragContext.ragPromptContext}`
             : ""),
@@ -673,7 +871,7 @@ export async function chatWithGemini(input: {
           } else if (call.name === "scheduleMeeting") {
             toolResults.push(await scheduleMeeting(call.args));
           } else {
-            toolResults.push(`Função não suportada: ${call.name}`);
+            toolResults.push(`FunÃ§Ã£o nÃ£o suportada: ${call.name}`);
           }
         } catch (error) {
           toolResults.push(
@@ -726,7 +924,7 @@ export async function chatWithGemini(input: {
     return {
       reply:
         photoReply?.reply ||
-        "Estou aqui para te ajudar com pisos, rodapés, telhas e ripados. Me diga qual ambiente você quer transformar para eu te orientar no produto ideal.",
+        "Estou aqui para te ajudar com pisos, rodapÃ©s, telhas e ripados. Me diga qual ambiente vocÃª quer transformar para eu te orientar no produto ideal.",
       media: photoReply?.media || ([] as ChatMedia[]),
       rag: {
         filesFound: ragContext.filesFound,

@@ -15,6 +15,7 @@ import {
   LogIn,
   Plus,
   Trash2,
+  Users,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Meeting } from "../types";
@@ -243,6 +244,9 @@ export default function AdminMeetings() {
         <nav className="flex-1 p-6 space-y-2">
           <Link to="/admin" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
             <LayoutDashboard className="w-5 h-5" /> Dashboard
+          </Link>
+          <Link to="/admin/leads" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
+            <Users className="w-5 h-5" /> Leads
           </Link>
           <Link to="/admin/meetings" className="flex items-center gap-3 p-3 bg-white/10 rounded-lg text-sm font-medium transition-colors">
             <Calendar className="w-5 h-5" /> Reuniões
