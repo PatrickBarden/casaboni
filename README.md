@@ -2,19 +2,43 @@
 <img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
 
-# Run and deploy your AI Studio app
+# Casaboni - Setup Local
 
-This contains everything you need to run your app locally.
+This project was exported from AI Studio and adapted to run locally with Firebase + Gemini.
 
-View your app in AI Studio: https://ai.studio/apps/f582f4de-81c3-4a0f-84f5-9a75b5fd666e
+## Prerequisites
 
-## Run Locally
+- Node.js 20+
 
-**Prerequisites:**  Node.js
-
+## Run locally
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Create `.env.local` from `.env.example`
+3. Fill at least:
+   - `GEMINI_API_KEY`
+   - `APP_URL` (for local use, `http://localhost:3000`)
+4. Start development server:
    `npm run dev`
+5. Open:
+   `http://localhost:3000`
+
+## Optional: use a different local port
+
+Set `PORT` in `.env.local` (example: `PORT=3100`).
+
+## Database connection (Casaboni Firebase/Firestore)
+
+By default, the app uses `firebase-applet-config.json`.
+To connect to the real Casaboni Firebase project, set these variables in `.env.local`:
+
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_MEASUREMENT_ID` (optional)
+- `VITE_FIREBASE_DATABASE_ID` (Firestore database id)
+
+After saving `.env.local`, restart `npm run dev`.
