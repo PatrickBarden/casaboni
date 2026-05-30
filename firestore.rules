@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: leads
+    // Fields:
+    //   - id: string
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - city: string
+    //   - product: string
+    //   - environment: string
+    //   - area: string
+    //   - date: string (required, YYYY-MM-DD)
+    //   - status: string (required, enum: Novo, Em atendimento, Fechado)
+    //
+    // Collection: meetings
+    // Fields:
+    //   - id: string
+    //   - customerName: string (required)
+    //   - customerEmail: string (required, email)
+    //   - phone: string
+    //   - date: string (required, YYYY-MM-DD)
+    //   - time: string (required, HH:MM)
+    //   - topic: string
+    //   - status: string (required, enum: Agendada, Concluída, Cancelada)
+    //
+    // Collection: products
+    // Fields:
+    //   - id: string
+    //   - name: string (required)
+    //   - collection: string (required)
+    //   - price: string (required)
+    //   - status: string (required, enum: Ativo, Inativo)
+    //   - image: string (uri)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "bardendesenvolvimento@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDate(date) {
+      return date is string && date.matches("^\\d{4}-\\d{2}-\\d{2}$");
+    }
+
+    function isValidTime(time) {
+      return time is string && time.matches("^\\d{2}:\\d{2}$");
+    }
+
+    function isValidLead(data) {
+      return data.keys().hasAll(['name', 'phone', 'date', 'status']) &&
+             data.name is string &&
+             data.phone is string &&
+             data.status in ['Novo', 'Em atendimento', 'Fechado'];
+    }
+
+    function isValidMeeting(data) {
+      return data.keys().hasAll(['customerName', 'customerEmail', 'date', 'time', 'status']) &&
+             data.customerName is string &&
+             data.customerEmail is string &&
+             data.status in ['Agendada', 'Concluída', 'Cancelada'];
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'collection', 'price', 'status']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.collection is string && data.collection.size() > 0 && data.collection.size() < 100 &&
+             data.price is string && data.price.size() > 0 && data.price.size() < 50 &&
+             data.status in ['Ativo', 'Inativo'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /leads/{leadId} {
+      allow read: if isAdmin();
+      allow create: if true; // Allow public lead creation
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /meetings/{meetingId} {
+      allow read: if isAdmin();
+      allow create: if true; // Allow public meeting scheduling
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if true; // Products are public
+      allow create, update, delete: if isAdmin() && isValidProduct(request.resource.data);
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isAdmin();
+    }
+  }
+}

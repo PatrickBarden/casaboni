@@ -1,0 +1,42 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap');
+
+@theme {
+  --font-sans: "Ubuntu", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #0F292E;
+  --color-action: #E07B34;
+  --color-surface: #F9F9F9;
+  --color-surface-low: #F3F3F3;
+  --color-surface-lowest: #FFFFFF;
+  --color-surface-high: #E8E8E8;
+  --color-outline: #72787A;
+  --color-outline-variant: rgba(114, 120, 122, 0.15);
+}
+
+@layer base {
+  * {
+    border-radius: 0 !important;
+  }
+  
+  body {
+    @apply bg-surface text-primary antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
+}
+
+.glass-nav {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+}
+
+.action-gradient {
+  background: linear-gradient(135deg, #E07B34 0%, #ff9d5c 100%);
+}
+
+.shadow-ambient {
+  box-shadow: 0px 24px 48px rgba(15, 41, 46, 0.06);
+}

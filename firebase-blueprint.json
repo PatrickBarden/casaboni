@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "Lead": {
+      "title": "Lead",
+      "description": "A potential customer captured by the AI agent or quiz.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "product": { "type": "string" },
+        "environment": { "type": "string" },
+        "area": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Novo", "Em atendimento", "Fechado"] }
+      },
+      "required": ["name", "phone", "date", "status"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "A technical consultation scheduled with a customer.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "time": { "type": "string" },
+        "topic": { "type": "string" },
+        "status": { "type": "string", "enum": ["Agendada", "Concluída", "Cancelada"] }
+      },
+      "required": ["customerName", "customerEmail", "date", "time", "status"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "A premium vinyl flooring product.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "collection": { "type": "string" },
+        "price": { "type": "string" },
+        "status": { "type": "string", "enum": ["Ativo", "Inativo"] },
+        "image": { "type": "string", "format": "uri" }
+      },
+      "required": ["name", "collection", "price", "status"]
+    }
+  },
+  "firestore": {
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Collection of customer leads."
+    },
+    "/meetings/{meetingId}": {
+      "schema": "Meeting",
+      "description": "Collection of scheduled meetings."
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of flooring products."
+    }
+  }
+}
