@@ -473,9 +473,7 @@ export async function chatWithGemini(input: {
   history: ChatMessage[];
   customerContext?: string;
 }) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY ausente no servidor");
-  }
+  const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
 
   const ragContext = await fetchRagContext(input.message, input.customerContext);
 
@@ -500,14 +498,18 @@ export async function chatWithGemini(input: {
   const maybeTime = extractTime(input.message);
 
   if (hasMeetingIntent(input.message) && maybeName && maybeEmail && maybeDate && maybeTime) {
-    await scheduleMeeting({
-      name: maybeName,
-      email: maybeEmail,
-      phone: maybePhone,
-      date: maybeDate,
-      time: maybeTime,
-      topic: "Consultoria Técnica",
-    });
+    try {
+      await scheduleMeeting({
+        name: maybeName,
+        email: maybeEmail,
+        phone: maybePhone,
+        date: maybeDate,
+        time: maybeTime,
+        topic: "Consultoria Técnica",
+      });
+    } catch (error) {
+      console.error("Deterministic scheduleMeeting fallback error:", error);
+    }
     return {
       reply: `Perfeito, ${maybeName}. Reunião agendada para ${maybeDate} às ${maybeTime}. Se quiser, já me diga o ambiente e a metragem para adiantarmos a consultoria.`,
       rag: {
@@ -518,12 +520,16 @@ export async function chatWithGemini(input: {
   }
 
   if (hasLeadIntent(input.message) && maybeName && maybePhone) {
-    await saveLead({
-      name: maybeName,
-      phone: maybePhone,
-      environment: extractEnvironment(input.message),
-      area: "",
-    });
+    try {
+      await saveLead({
+        name: maybeName,
+        phone: maybePhone,
+        environment: extractEnvironment(input.message),
+        area: "",
+      });
+    } catch (error) {
+      console.error("Deterministic saveLead fallback error:", error);
+    }
     return {
       reply: `Perfeito, ${maybeName}. Seus dados já foram cadastrados com sucesso. Para eu te indicar a melhor linha, qual ambiente você quer transformar?`,
       rag: {
@@ -533,7 +539,19 @@ export async function chatWithGemini(input: {
     };
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  if (!geminiApiKey) {
+    return {
+      reply: buildQuotaFallbackReply(input.message, {
+        driveCatalog: ragContext.driveCatalog,
+      }),
+      rag: {
+        filesFound: ragContext.filesFound,
+        driveCatalog: ragContext.driveCatalog,
+      },
+    };
+  }
+
+  const ai = new GoogleGenAI({ apiKey: geminiApiKey });
   try {
     const chat = ai.chats.create({
       model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
