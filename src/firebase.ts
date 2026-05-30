@@ -1,5 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  getAuth,
+  getRedirectResult,
+  GoogleAuthProvider,
+  setPersistence,
+  signInWithPopup,
+} from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseAppletConfig from '../firebase-applet-config.json';
 
@@ -23,6 +30,26 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+// Ensure redirect login can restore session reliably across reloads/local dev.
+let authBootstrapPromise: Promise<void> | null = null;
+export const waitForAuthBootstrap = () => {
+  if (!authBootstrapPromise) {
+    authBootstrapPromise = (async () => {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (error) {
+        console.warn('Auth persistence setup failed:', error);
+      }
+      try {
+        await getRedirectResult(auth);
+      } catch (error) {
+        console.warn('Auth redirect result check failed:', error);
+      }
+    })();
+  }
+  return authBootstrapPromise;
+};
 
 // Error Handling Spec for Firestore Operations
 export enum OperationType {
@@ -94,7 +121,35 @@ export const loginWithGoogle = async () => {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error) {
+    const code = (error as any)?.code as string | undefined;
+    // Avoid redirect fallback in embedded browsers (can lose OAuth state in sessionStorage).
+    if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
+      throw error;
+    }
     console.error("Error signing in with Google:", error);
     throw error;
   }
 };
+
+export function getFirebaseAuthErrorMessage(error: unknown) {
+  const code = (error as any)?.code as string | undefined;
+  if (code === "auth/unauthorized-domain") {
+    return "Dominio nao autorizado no Firebase Auth. Adicione localhost em Authentication > Settings > Authorized domains.";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "Login Google desabilitado no Firebase. Ative em Authentication > Sign-in method.";
+  }
+  if (code === "auth/popup-closed-by-user") {
+    return "Popup de login foi fechado antes da conclusao.";
+  }
+  if (code === "auth/popup-blocked") {
+    return "Popup bloqueado pelo navegador. Permita popups/cookies ou abra o painel em Chrome/Edge (fora do navegador interno).";
+  }
+  if (code === "auth/cancelled-popup-request") {
+    return "Solicitação de popup cancelada. Tente novamente em navegador comum (Chrome/Edge).";
+  }
+  if (code === "auth/web-storage-unsupported") {
+    return "Este navegador nao suporta o armazenamento exigido pelo Firebase Auth. Abra o painel em Chrome/Edge.";
+  }
+  return `Falha no login Google${code ? ` (${code})` : ""}.`;
+}

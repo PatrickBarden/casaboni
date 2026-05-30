@@ -27,5 +27,13 @@ export interface Meeting {
   date: string;
   time: string;
   topic: string;
-  status: 'Agendada' | 'Concluída' | 'Cancelada';
+  status: "Agendada" | "Concluída" | "Cancelada";
+}
+
+export interface AdminUser {
+  id: string;
+  email?: string;
+  name?: string;
+  role: "admin" | "sales" | "viewer";
+  createdAt?: any;
 }

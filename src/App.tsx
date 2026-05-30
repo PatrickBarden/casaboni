@@ -4,6 +4,7 @@ import SuccessPage from "./pages/SuccessPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminProducts from "./pages/AdminProducts";
 import AdminMeetings from "./pages/AdminMeetings";
+import AdminUsers from "./pages/AdminUsers";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/meetings" element={<AdminMeetings />} />
+          <Route path="/admin/users" element={<AdminUsers />} />
         </Routes>
       </Router>
     </ErrorBoundary>

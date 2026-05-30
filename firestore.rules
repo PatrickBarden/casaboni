@@ -49,7 +49,9 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "bardendesenvolvimento@gmail.com" && request.auth.token.email_verified == true));
+          ((request.auth.token.email == "bardendesenvolvimento@gmail.com" ||
+            request.auth.token.email == "ezequieldeboni1@gmail.com") &&
+            request.auth.token.email_verified == true));
     }
 
     function isValidEmail(email) {
@@ -106,12 +108,14 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if true; // Products are public
-      allow create, update, delete: if isAdmin() && isValidProduct(request.resource.data);
+      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow create, update: if isAdmin();
+      allow delete: if isAdmin();
     }
   }
 }

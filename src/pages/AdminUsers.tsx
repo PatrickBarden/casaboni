@@ -5,18 +5,15 @@ import {
   Package,
   LogOut,
   Search,
-  Filter,
   Calendar,
-  MoreVertical,
-  TrendingUp,
-  CheckCircle2,
-  Users,
   LogIn,
   User,
+  Plus,
+  Edit,
   Trash2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { Lead } from "../types";
+import { AdminUser } from "../types";
 import {
   db,
   auth,
@@ -31,14 +28,22 @@ import {
   onSnapshot,
   orderBy,
   query,
-  limit,
+  serverTimestamp,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import BrandLogo from "../components/BrandLogo";
 
-export default function AdminDashboard() {
-  const [leads, setLeads] = useState<Lead[]>([]);
+function normalizeRole(role: string): AdminUser["role"] {
+  const value = role.toLowerCase();
+  if (value.includes("admin")) return "admin";
+  if (value.includes("view")) return "viewer";
+  return "sales";
+}
+
+export default function AdminUsers() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [user, setUser] = useState<any>(null);
@@ -46,56 +51,88 @@ export default function AdminDashboard() {
   const [dbError, setDbError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const filteredLeads = useMemo(() => {
+  const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return leads;
-    return leads.filter(
-      (l) =>
-        (l.name || "").toLowerCase().includes(term) ||
-        (l.phone || "").toLowerCase().includes(term) ||
-        (l.environment || "").toLowerCase().includes(term) ||
-        (l.area || "").toLowerCase().includes(term)
+    if (!term) return users;
+    return users.filter(
+      (u) =>
+        (u.email || "").toLowerCase().includes(term) ||
+        (u.name || "").toLowerCase().includes(term) ||
+        u.role.toLowerCase().includes(term)
     );
-  }, [leads, search]);
+  }, [users, search]);
 
-  const stats = [
-    { label: "Total de Leads", value: leads.length, icon: Users, color: "text-blue-600" },
-    {
-      label: "Leads de Hoje",
-      value: leads.filter((l) => l.date === new Date().toISOString().split("T")[0]).length,
-      icon: TrendingUp,
-      color: "text-green-600",
-    },
-    { label: "Taxa de Conversão", value: "24%", icon: CheckCircle2, color: "text-orange-600" },
-  ];
+  const createUser = async () => {
+    const uid = window.prompt("UID do usuário (Firebase Auth):");
+    if (!uid?.trim()) return;
+    const email = window.prompt("E-mail do usuário:");
+    if (!email?.trim()) return;
+    const name = window.prompt("Nome do usuário:", "") || "";
+    const role = normalizeRole(window.prompt("Perfil (admin/sales/viewer):", "sales") || "sales");
 
-  const editLeadStatus = async (lead: Lead) => {
-    const status = window.prompt("Status do lead (Novo, Em Atendimento, Fechado):", lead.status || "Novo");
-    if (!status?.trim()) return;
     try {
-      await updateDoc(doc(db, "leads", lead.id), { status: status.trim() });
-      alert("Lead atualizado.");
+      await setDoc(
+        doc(db, "users", uid.trim()),
+        {
+          email: email.trim(),
+          name: name.trim(),
+          role,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      alert("Usuário salvo/atualizado com sucesso.");
     } catch (error: any) {
-      console.error("update lead error:", error);
-      alert(error?.code === "permission-denied" ? "Sem permissão para atualizar lead." : "Erro ao atualizar lead.");
+      console.error("create user error:", error);
+      alert(
+        error?.code === "permission-denied"
+          ? "Sem permissão para criar usuário."
+          : "Erro ao criar usuário."
+      );
     }
   };
 
-  const deleteLeadById = async (lead: Lead) => {
-    if (!window.confirm(`Excluir lead de ${lead.name}?`)) return;
+  const editUser = async (userRow: AdminUser) => {
+    const name = window.prompt("Nome:", userRow.name || "") || userRow.name || "";
+    const email = window.prompt("E-mail:", userRow.email || "") || userRow.email || "";
+    const role = normalizeRole(
+      window.prompt("Perfil (admin/sales/viewer):", userRow.role || "sales") || userRow.role
+    );
     try {
-      await deleteDoc(doc(db, "leads", lead.id));
-      alert("Lead excluído.");
+      await updateDoc(doc(db, "users", userRow.id), {
+        name: name.trim(),
+        email: email.trim(),
+        role,
+      });
+      alert("Usuário atualizado.");
     } catch (error: any) {
-      console.error("delete lead error:", error);
-      alert(error?.code === "permission-denied" ? "Sem permissão para excluir lead." : "Erro ao excluir lead.");
+      console.error("edit user error:", error);
+      alert(
+        error?.code === "permission-denied"
+          ? "Sem permissão para editar usuário."
+          : "Erro ao editar usuário."
+      );
+    }
+  };
+
+  const deleteUserById = async (userRow: AdminUser) => {
+    if (!window.confirm(`Excluir usuário ${userRow.email || userRow.id}?`)) return;
+    try {
+      await deleteDoc(doc(db, "users", userRow.id));
+      alert("Usuário excluído.");
+    } catch (error: any) {
+      console.error("delete user error:", error);
+      alert(
+        error?.code === "permission-denied"
+          ? "Sem permissão para excluir usuário."
+          : "Erro ao excluir usuário."
+      );
     }
   };
 
   useEffect(() => {
     let cancelled = false;
     let unsubscribeAuth: (() => void) | undefined;
-
     const initAuth = async () => {
       await waitForAuthBootstrap();
       if (cancelled) return;
@@ -104,7 +141,6 @@ export default function AdminDashboard() {
         setAuthChecking(false);
       });
     };
-
     initAuth();
     return () => {
       cancelled = true;
@@ -115,26 +151,25 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(collection(db, "leads"), orderBy("createdAt", "desc"), limit(30));
+    const q = query(collection(db, "users"), orderBy("email", "asc"));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Lead[];
-        setLeads(data);
+        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as AdminUser[];
+        setUsers(data);
         setDbError(null);
         setLoading(false);
       },
       (error: any) => {
-        console.error("Firestore leads read error:", error);
+        console.error("Firestore users read error:", error);
         setLoading(false);
         if (error?.code === "permission-denied") {
-          setDbError("Seu usuário autenticado não tem permissão de admin para ler leads.");
+          setDbError("Seu usuário autenticado não tem permissão de admin para ler usuários.");
           return;
         }
-        setDbError("Não foi possível carregar os leads. Verifique a configuração do Firebase.");
+        setDbError("Não foi possível carregar os usuários. Verifique a configuração do Firebase.");
       }
     );
-
     return () => unsubscribe();
   }, [user]);
 
@@ -155,13 +190,12 @@ export default function AdminDashboard() {
         setAuthError(getFirebaseAuthErrorMessage(error));
       }
     };
-
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-low p-6">
         <div className="bg-white border border-outline-variant p-12 max-w-md w-full text-center shadow-ambient">
           <h2 className="text-3xl font-bold text-primary uppercase tracking-tighter mb-4">Acesso Restrito</h2>
           <p className="text-sm text-outline mb-8 uppercase tracking-widest">
-            Faça login para gerenciar seus leads
+            Faça login para gerenciar usuários
           </p>
           {authError && (
             <p className="text-xs text-red-700 bg-red-50 border border-red-200 p-3 mb-4 uppercase tracking-wide">
@@ -185,9 +219,8 @@ export default function AdminDashboard() {
         <div className="p-8 border-b border-white/10">
           <BrandLogo subtitle="Admin Panel" light compact />
         </div>
-
         <nav className="flex-1 p-6 space-y-2">
-          <Link to="/admin" className="flex items-center gap-3 p-3 bg-white/10 rounded-lg text-sm font-medium">
+          <Link to="/admin" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
             <LayoutDashboard className="w-5 h-5" /> Dashboard
           </Link>
           <Link to="/admin/meetings" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
@@ -196,11 +229,10 @@ export default function AdminDashboard() {
           <Link to="/admin/products" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
             <Package className="w-5 h-5" /> Produtos
           </Link>
-          <Link to="/admin/users" className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg text-sm font-medium transition-colors">
+          <Link to="/admin/users" className="flex items-center gap-3 p-3 bg-white/10 rounded-lg text-sm font-medium transition-colors">
             <User className="w-5 h-5" /> Usuários
           </Link>
         </nav>
-
         <div className="p-6 border-t border-white/10">
           <button
             onClick={() => signOut(auth)}
@@ -213,7 +245,7 @@ export default function AdminDashboard() {
 
       <main className="flex-1 ml-64 p-10">
         <header className="flex justify-between items-center mb-12">
-          <h1 className="text-3xl font-bold text-primary uppercase tracking-tighter">Dashboard de Leads</h1>
+          <h1 className="text-3xl font-bold text-primary uppercase tracking-tighter">Gerenciamento de Usuários</h1>
           <div className="flex items-center gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline" />
@@ -221,12 +253,15 @@ export default function AdminDashboard() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Pesquisar leads..."
+                placeholder="Pesquisar usuários..."
                 className="pl-10 pr-4 py-2 bg-white border border-outline-variant rounded-full text-sm focus:outline-none focus:border-action w-64"
               />
             </div>
-            <button className="p-2 bg-white border border-outline-variant rounded-full hover:bg-surface transition-colors">
-              <Filter className="w-5 h-5 text-primary" />
+            <button
+              onClick={createUser}
+              className="px-5 py-2 bg-action text-white font-bold text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-[#c96a2b] transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Novo Usuário
             </button>
           </div>
         </header>
@@ -237,97 +272,70 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-          {stats.map((stat, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="bg-white p-8 shadow-ambient border border-outline-variant flex items-center justify-between"
-            >
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-outline mb-2">{stat.label}</p>
-                <p className="text-4xl font-bold text-primary">{stat.value}</p>
-              </div>
-              <stat.icon className={`w-12 h-12 ${stat.color} opacity-20`} />
-            </motion.div>
-          ))}
-        </div>
-
         <div className="bg-white shadow-ambient border border-outline-variant overflow-hidden">
           <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-lowest">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-primary">Leads Recentes</h2>
-            <span className="text-xs font-bold uppercase tracking-widest text-outline">Total: {filteredLeads.length}</span>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-primary">Usuários do Sistema</h2>
+            <span className="text-xs font-bold uppercase tracking-widest text-outline">Total: {filteredUsers.length}</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-surface-low border-b border-outline-variant">
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Cliente</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Ambiente</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Área</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Data</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Status</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">UID</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Nome</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">E-mail</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Perfil</th>
                   <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant">
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="p-10 text-center text-outline">
+                    <td colSpan={5} className="p-10 text-center text-outline">
                       Carregando...
                     </td>
                   </tr>
-                ) : filteredLeads.length === 0 ? (
+                ) : filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-10 text-center text-outline">
-                      Nenhum lead encontrado.
+                    <td colSpan={5} className="p-10 text-center text-outline">
+                      Nenhum usuário encontrado.
                     </td>
                   </tr>
                 ) : (
-                  filteredLeads.map((lead) => (
-                    <tr key={lead.id} className="hover:bg-surface transition-colors">
+                  filteredUsers.map((row, i) => (
+                    <motion.tr
+                      key={row.id}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      className="hover:bg-surface transition-colors"
+                    >
+                      <td className="p-4 text-[11px] text-outline">{row.id}</td>
+                      <td className="p-4 text-sm font-medium text-primary">{row.name || "-"}</td>
+                      <td className="p-4 text-sm text-primary">{row.email || "-"}</td>
                       <td className="p-4">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-bold text-primary">{lead.name}</span>
-                          <span className="text-[10px] text-outline uppercase">{lead.phone}</span>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-xs font-medium text-primary uppercase">{lead.environment}</span>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-xs font-medium text-primary uppercase">{lead.area}</span>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-xs text-outline">{lead.date}</span>
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
-                            lead.status === "Novo"
-                              ? "bg-blue-100 text-blue-700"
-                              : lead.status === "Em Atendimento"
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-green-100 text-green-700"
-                          }`}
-                        >
-                          {lead.status}
+                        <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-surface-low text-primary">
+                          {row.role}
                         </span>
                       </td>
                       <td className="p-4">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => editLeadStatus(lead)} className="p-1 hover:bg-surface-high rounded transition-colors">
-                            <MoreVertical className="w-4 h-4 text-outline" />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => editUser(row)}
+                            className="p-2 hover:bg-surface-high rounded transition-colors text-outline"
+                          >
+                            <Edit className="w-4 h-4" />
                           </button>
-                          <button onClick={() => deleteLeadById(lead)} className="p-1 hover:bg-red-50 rounded transition-colors">
-                            <Trash2 className="w-4 h-4 text-outline hover:text-red-600" />
+                          <button
+                            onClick={() => deleteUserById(row)}
+                            className="p-2 hover:bg-red-50 rounded transition-colors text-outline hover:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
-                    </tr>
+                    </motion.tr>
                   ))
                 )}
               </tbody>

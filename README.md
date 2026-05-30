@@ -42,3 +42,35 @@ To connect to the real Casaboni Firebase project, set these variables in `.env.l
 - `VITE_FIREBASE_DATABASE_ID` (Firestore database id)
 
 After saving `.env.local`, restart `npm run dev`.
+
+## Firestore connectivity check
+
+Run a quick database diagnosis:
+
+- `npm run check:firestore` (read checks)
+- `node scripts/check-firestore.mjs --write` (also tests lead creation)
+- `npm run smoke` (Gemini + Firestore read/write smoke test)
+
+## Backend chat and RAG
+
+The landing chat now uses the backend endpoint:
+
+- `POST /api/chat`
+
+Optional diagnostic endpoint:
+
+- `GET /api/rag/health`
+
+To enable Drive-based context via n8n, set in `.env.local`:
+
+- `N8N_RAG_WEBHOOK_URL`
+- `N8N_DRIVE_FOLDER_ID`
+
+### n8n workflows created
+
+- `Casaboni - Drive KB Controller v1`
+- `Casaboni - RAG Query Endpoint v1`
+
+Default webhook path for RAG query workflow:
+
+- `/webhook/casaboni-rag-query`
