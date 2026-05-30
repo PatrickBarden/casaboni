@@ -14,8 +14,7 @@ const firebaseConfig = {
   projectId: process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0033143716",
   storageBucket:
     process.env.VITE_FIREBASE_STORAGE_BUCKET || "gen-lang-client-0033143716.firebasestorage.app",
-  messagingSenderId:
-    process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "531996248416",
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "531996248416",
   appId: process.env.VITE_FIREBASE_APP_ID || "1:531996248416:web:2f8500bd1d453813d57605",
   measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || "",
 };
@@ -79,15 +78,19 @@ function extractEnvironment(text: string) {
   if (n.includes("sala")) return "Sala";
   if (n.includes("quarto")) return "Quarto";
   if (n.includes("cozinha")) return "Cozinha";
-  if (n.includes("escritorio")) return "Escritorio";
+  if (n.includes("escritorio")) return "Escritório";
   if (n.includes("banheiro")) return "Banheiro";
-  if (n.includes("area gourmet")) return "Area Gourmet";
+  if (n.includes("area gourmet")) return "Área Gourmet";
   if (n.includes("comercial")) return "Comercial";
   return "";
 }
 
 function extractArea(text: string) {
-  const match = text.match(/\b(\d{1,4})\s*(m2|m²|metros?)\b/i);
+  const normalized = normalizeText(text).trim();
+  const directNumber = normalized.match(/^(\d{1,4})([.,]\d{1,2})?$/);
+  if (directNumber) return `${directNumber[1]}m²`;
+
+  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|m²|m|metros?|metro)\b/i);
   if (!match) return "";
   return `${match[1]}m²`;
 }
@@ -106,39 +109,20 @@ function extractEmail(text: string) {
 
 function extractName(text: string) {
   const compact = text.replace(/\s+/g, " ").trim();
-  const normalizedCompact = normalizeText(compact);
   const patterns = [
-    /meu nome[^a-zA-Z0-9]{0,8}\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
-    /\bnome\s*[:\-]\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
+    /meu nome[^a-zA-Z0-9]{0,8}\s*([\p{L}'\s]{3,80})/iu,
+    /\bnome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
   ];
 
   for (const pattern of patterns) {
     const match = compact.match(pattern);
     if (!match) continue;
-
     const cleaned = match[1]
       .split(/\b(?:whatsapp|telefone|celular|email|data|horario|às|as|e meu|meu)\b/i)[0]
       .replace(/[,.!?]+$/g, "")
       .trim();
 
     if (cleaned.length >= 3) return cleaned;
-  }
-
-  const normalizedMatch = normalizedCompact.match(
-    /meu nome(?:\s+e)?\s*[:\-]?\s*([a-z'\s]{3,80})/i
-  );
-  if (normalizedMatch?.[1]) {
-    const cleaned = normalizedMatch[1]
-      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|as|e meu|meu)\b/i)[0]
-      .replace(/[,.!?]+$/g, "")
-      .trim();
-    if (cleaned.length >= 3) {
-      return cleaned
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ");
-    }
   }
 
   return "";
@@ -204,7 +188,7 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
   const category = detectCategory(message);
   if (!category) {
     return {
-      reply: "Tenho fotos de pisos, rodapes, telhas shingle e ripados. Qual produto voce quer ver primeiro?",
+      reply: "Tenho fotos de pisos, rodapés, telhas shingle e ripados. Qual produto você quer ver primeiro?",
       selected: [],
     };
   }
@@ -224,21 +208,15 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
     }
   }
 
-  const dedup = selected
-    .filter((item, idx) => selected.findIndex((x) => x.url === item.url) === idx)
-    .slice(0, 6);
-
+  const dedup = selected.filter((item, idx) => selected.findIndex((x) => x.url === item.url) === idx).slice(0, 6);
   if (!dedup.length) {
     return {
-      reply: "Nao encontrei fotos dessa categoria no Drive agora. Posso te orientar por outra linha semelhante.",
+      reply: "Não encontrei fotos dessa categoria no Drive agora. Posso te orientar por outra linha semelhante.",
       selected: [],
     };
   }
 
-  return {
-    reply: "Perfeito! Separei as fotos do produto que voce pediu.",
-    selected: dedup,
-  };
+  return { reply: "Perfeito! Separei as fotos do produto que você pediu.", selected: dedup };
 }
 
 async function fetchRagContext(message: string, customerContext?: string) {
@@ -250,20 +228,11 @@ async function fetchRagContext(message: string, customerContext?: string) {
     const response = await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message,
-        question: message,
-        driveFolderId,
-        customerContext: customerContext || "",
-      }),
+      body: JSON.stringify({ message, question: message, driveFolderId, customerContext: customerContext || "" }),
     });
-
     if (!response.ok) return { driveCatalog: [] as string[] };
-
     const data = await response.json();
-    return {
-      driveCatalog: Array.isArray(data?.driveCatalog) ? data.driveCatalog : [],
-    };
+    return { driveCatalog: Array.isArray(data?.driveCatalog) ? data.driveCatalog : [] };
   } catch {
     return { driveCatalog: [] as string[] };
   }
@@ -280,11 +249,7 @@ function contextFromHistory(history: ChatMessage[]) {
     category: detectCategory(lastUserText),
     environment: extractEnvironment(lastUserText),
     area: extractArea(lastUserText),
-    greeted: history.some(
-      (m) =>
-        m.role === "bot" &&
-        normalizeText(m.text).includes("sou o consultor casaboni")
-    ),
+    greeted: history.some((m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")),
   };
 }
 
@@ -296,50 +261,33 @@ function buildGuidedReply(message: string, history: ChatMessage[]) {
 
   if (isGreeting(message)) {
     if (historyCtx.greeted) {
-      if (!category) {
-        return "Perfeito. Para eu te atender melhor, voce quer ver pisos, rodapes, telhas ou ripados?";
-      }
-      if (category && !environment) {
-        return `Perfeito. Para ${category}, qual ambiente voce quer transformar?`;
-      }
-      if (category && environment && !area) {
-        return `Otimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisao?`;
-      }
-      return "Perfeito. Me diga o proximo detalhe que voce quer analisar e eu te ajudo a decidir.";
+      if (!category) return "Perfeito. Para eu te atender melhor, você quer ver pisos, rodapés, telhas ou ripados?";
+      if (!environment) return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
+      if (!area) return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+      return "Perfeito. Me diga o próximo detalhe que você quer analisar e eu te ajudo a decidir.";
     }
-    return "Ola! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapes, telhas ou ripados. Qual categoria voce quer analisar primeiro?";
+    return "Olá! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapés, telhas ou ripados. Qual categoria você quer analisar primeiro?";
   }
 
   if (isPriceIntent(message) && !category) {
-    return "Consigo te orientar com orcamento, sim. Primeiro me diga a categoria: pisos, rodapes, telhas ou ripados.";
+    return "Consigo te orientar com orçamento, sim. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
   }
 
-  if (category && !environment) {
-    return `Perfeito. Para ${category}, qual ambiente voce quer transformar?`;
-  }
-
-  if (category && environment && !area) {
-    return `Otimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisao?`;
-  }
-
-  if (category && environment && area) {
-    return `Perfeito, para ${environment} com ${area}. Se quiser, ja te mostro a linha ideal para esse contexto.`;
-  }
+  if (category && !environment) return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
+  if (category && environment && !area) return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+  if (category && environment && area) return `Perfeito, para ${environment} com ${area}. Se quiser, já te mostro a linha ideal para esse contexto.`;
 
   return null;
 }
 
 function sanitizeReply(text: string) {
-  const clean = String(text || "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const clean = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
   if (!clean) return "Pode repetir, por favor?";
   return clean.slice(0, 700);
 }
 
 async function saveLead(args: { name: string; phone: string; environment?: string; area?: string }) {
   if (!db) return false;
-
   await addDoc(collection(db, "leads"), {
     name: args.name,
     phone: args.phone,
@@ -350,32 +298,22 @@ async function saveLead(args: { name: string; phone: string; environment?: strin
     source: "chat-agent-api",
     createdAt: serverTimestamp(),
   });
-
   return true;
 }
 
-async function scheduleMeeting(args: {
-  name: string;
-  email: string;
-  phone?: string;
-  date: string;
-  time: string;
-  topic?: string;
-}) {
+async function scheduleMeeting(args: { name: string; email: string; phone?: string; date: string; time: string; topic?: string }) {
   if (!db) return false;
-
   await addDoc(collection(db, "meetings"), {
     customerName: args.name,
     customerEmail: args.email,
     phone: args.phone || "",
     date: args.date,
     time: args.time,
-    topic: args.topic || "Consultoria Tecnica",
+    topic: args.topic || "Consultoria Técnica",
     status: "Agendada",
     source: "chat-agent-api",
     createdAt: serverTimestamp(),
   });
-
   return true;
 }
 
@@ -400,11 +338,7 @@ export default async function handler(req: any, res: any) {
 
     if (isPhotoIntent(message)) {
       const picked = pickCatalogByIntent(message, catalog);
-      res.status(200).json({
-        ok: true,
-        reply: picked.reply,
-        media: buildMediaFromCatalog(picked.selected),
-      });
+      res.status(200).json({ ok: true, reply: picked.reply, media: buildMediaFromCatalog(picked.selected) });
       return;
     }
 
@@ -416,21 +350,11 @@ export default async function handler(req: any, res: any) {
 
     if (hasMeetingIntent(message) && maybeName && maybeEmail && maybeDate && maybeTime) {
       try {
-        await scheduleMeeting({
-          name: maybeName,
-          email: maybeEmail,
-          phone: maybePhone,
-          date: maybeDate,
-          time: maybeTime,
-          topic: "Consultoria Tecnica",
-        });
-      } catch {
-        // keep conversational response even if storage fails
-      }
-
+        await scheduleMeeting({ name: maybeName, email: maybeEmail, phone: maybePhone, date: maybeDate, time: maybeTime });
+      } catch {}
       res.status(200).json({
         ok: true,
-        reply: `Perfeito, ${maybeName}. Reuniao agendada para ${maybeDate} as ${maybeTime}. Se quiser, ja me diga o ambiente e a metragem para adiantarmos a consultoria.`,
+        reply: `Perfeito, ${maybeName}. Reunião agendada para ${maybeDate} às ${maybeTime}. Se quiser, já me diga o ambiente e a metragem para adiantarmos a consultoria.`,
         media: [],
       });
       return;
@@ -441,30 +365,18 @@ export default async function handler(req: any, res: any) {
       if (!maybeName) missing.push("nome");
       if (!maybeEmail) missing.push("email");
       if (!maybeDate) missing.push("data (YYYY-MM-DD)");
-      if (!maybeTime) missing.push("horario (HH:MM)");
-      res.status(200).json({
-        ok: true,
-        reply: `Perfeito, eu agendo para voce. Me confirme: ${missing.join(", ")}.`,
-        media: [],
-      });
+      if (!maybeTime) missing.push("horário (HH:MM)");
+      res.status(200).json({ ok: true, reply: `Perfeito, eu agendo para você. Me confirme: ${missing.join(", ")}.`, media: [] });
       return;
     }
 
     if ((hasLeadIntent(message) || maybePhone) && maybeName && maybePhone) {
       try {
-        await saveLead({
-          name: maybeName,
-          phone: maybePhone,
-          environment: extractEnvironment(message),
-          area: extractArea(message),
-        });
-      } catch {
-        // keep conversational response even if storage fails
-      }
-
+        await saveLead({ name: maybeName, phone: maybePhone, environment: extractEnvironment(message), area: extractArea(message) });
+      } catch {}
       res.status(200).json({
         ok: true,
-        reply: `Perfeito, ${maybeName}. Seus dados ja foram cadastrados. Agora me diga o ambiente e a metragem para eu indicar a melhor linha.`,
+        reply: `Perfeito, ${maybeName}. Seus dados já foram cadastrados. Agora me diga o ambiente e a metragem para eu indicar a melhor linha.`,
         media: [],
       });
       return;
@@ -472,11 +384,7 @@ export default async function handler(req: any, res: any) {
 
     if ((hasLeadIntent(message) || maybePhone) && (!maybeName || !maybePhone)) {
       const missingLead = !maybeName ? "nome completo" : "telefone/WhatsApp";
-      res.status(200).json({
-        ok: true,
-        reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`,
-        media: [],
-      });
+      res.status(200).json({ ok: true, reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`, media: [] });
       return;
     }
 
@@ -490,8 +398,7 @@ export default async function handler(req: any, res: any) {
     if (!key) {
       res.status(200).json({
         ok: true,
-        reply:
-          "Sou o Consultor Casaboni e estou aqui para te atender. Me diga o ambiente, metragem aproximada e categoria desejada para eu te orientar melhor.",
+        reply: "Sou o Consultor Casaboni e estou aqui para te atender. Me diga o ambiente, metragem aproximada e categoria desejada para eu te orientar melhor.",
         media: [],
       });
       return;
@@ -529,7 +436,7 @@ export default async function handler(req: any, res: any) {
               },
               {
                 name: "scheduleMeeting",
-                description: "Agendar reuniao quando nome, email, data e horario forem confirmados",
+                description: "Agendar reunião quando nome, email, data e horário forem confirmados",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
@@ -548,17 +455,17 @@ export default async function handler(req: any, res: any) {
         ],
       },
       contents: [
-        "Voce e o Consultor Casaboni (vendas consultivas em ambientes).",
-        "Regras obrigatorias:",
-        "- Nao invente produtos, precos, estoque, prazos ou politicas.",
-        "- Se faltar dado, faca apenas 1 pergunta objetiva por vez.",
-        "- Mantenha continuidade com o historico e evite mudar de assunto.",
-        "- Respostas curtas (ate 3 frases), em pt-BR, tom profissional e amigavel.",
+        "Você é o Consultor Casaboni (vendas consultivas em ambientes).",
+        "Regras obrigatórias:",
+        "- Não invente produtos, preços, estoque, prazos ou políticas.",
+        "- Se faltar dado, faça apenas 1 pergunta objetiva por vez.",
+        "- Mantenha continuidade com o histórico e evite mudar de assunto.",
+        "- Respostas curtas (até 3 frases), em pt-BR, tom profissional e amigável.",
         "- Antes de listar produtos, confirme categoria/ambiente/metragem.",
-        "- Produtos Casaboni: pisos, rodapes, telhas shingle e ripados.",
+        "- Produtos Casaboni: pisos, rodapés, telhas shingle e ripados.",
         "",
-        "Catalogo disponivel:",
-        ragCatalogCompact || "- Catalogo nao carregado nesta requisicao.",
+        "Catálogo disponível:",
+        ragCatalogCompact || "- Catálogo não carregado nesta requisição.",
         "",
         conversation,
       ].join("\n"),
@@ -569,49 +476,26 @@ export default async function handler(req: any, res: any) {
         if (call.name === "saveLead") {
           const args = (call.args || {}) as { name: string; phone: string; environment?: string; area?: string };
           if (args.name && args.phone) {
-            try {
-              await saveLead(args);
-            } catch {
-              // ignore and continue
-            }
+            try { await saveLead(args); } catch {}
           }
         }
 
         if (call.name === "scheduleMeeting") {
-          const args = (call.args || {}) as {
-            name: string;
-            email: string;
-            phone?: string;
-            date: string;
-            time: string;
-            topic?: string;
-          };
+          const args = (call.args || {}) as { name: string; email: string; phone?: string; date: string; time: string; topic?: string };
           if (args.name && args.email && args.date && args.time) {
-            try {
-              await scheduleMeeting(args);
-            } catch {
-              // ignore and continue
-            }
+            try { await scheduleMeeting(args); } catch {}
           }
         }
       }
     }
 
-    res.status(200).json({
-      ok: true,
-      reply: sanitizeReply(response.text),
-      media: [],
-    });
+    res.status(200).json({ ok: true, reply: sanitizeReply(response.text), media: [] });
   } catch {
     const message = String(req.body?.message || "").trim();
     const fallbackReply = message
       ? "Estou aqui para te ajudar com a escolha do produto ideal. Me diga ambiente, metragem e categoria."
-      : "Posso te ajudar com pisos, rodapes, telhas e ripados. Como posso te atender?";
+      : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
 
-    res.status(200).json({
-      ok: true,
-      reply: fallbackReply,
-      media: [],
-    });
+    res.status(200).json({ ok: true, reply: fallbackReply, media: [] });
   }
 }

@@ -455,7 +455,11 @@ function hasPriceIntent(text: string) {
 }
 
 function extractArea(text: string) {
-  const match = text.match(/\b(\d{1,4})\s*(m2|m²|metros?)\b/i);
+  const normalized = normalizeText(text).trim();
+  const directNumber = normalized.match(/^(\d{1,4})([.,]\d{1,2})?$/);
+  if (directNumber) return `${directNumber[1]}m²`;
+
+  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|m²|m|metros?|metro)\b/i);
   if (!match) return "";
   return `${match[1]}m²`;
 }
@@ -493,6 +497,10 @@ function buildGuidedConsultingReply(message: string, history: ChatMessage[]) {
 
   if (category && environment && !area) {
     return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+  }
+
+  if (category && environment && area) {
+    return `Perfeito, para ${environment} com ${area}. Agora eu te mostro as opções mais adequadas dessa linha.`;
   }
 
   return "";
