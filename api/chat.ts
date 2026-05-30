@@ -164,9 +164,14 @@ export default async function handler(req: any, res: any) {
 
     res.status(200).json({ ok: true, reply: String(response.text || "Pode repetir, por favor?"), media: [] });
   } catch (error) {
-    res.status(500).json({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
+    const message = String(req.body?.message || "").trim();
+    const fallbackReply = message
+      ? "Estou aqui para te ajudar com a escolha do produto ideal. Me diga ambiente e metragem aproximada."
+      : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
+    res.status(200).json({
+      ok: true,
+      reply: fallbackReply,
+      media: [],
     });
   }
 }

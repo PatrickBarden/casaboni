@@ -734,9 +734,14 @@ export function registerApiRoutes(app: express.Express) {
       res.json({ ok: true, ...result });
     } catch (error) {
       console.error("POST /api/chat error:", error);
-      res.status(500).json({
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
+      const message = String(req.body?.message || "").trim();
+      const fallbackReply = message
+        ? buildQuotaFallbackReply(message, { driveCatalog: [] })
+        : "Estou aqui para te ajudar com a escolha do produto ideal. Me diga ambiente e metragem aproximada.";
+      res.status(200).json({
+        ok: true,
+        reply: fallbackReply,
+        media: [],
       });
     }
   });
