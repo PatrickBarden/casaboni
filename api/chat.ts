@@ -85,8 +85,8 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
 }
 
 async function fetchRagContext(message: string, customerContext?: string) {
-  const webhook = process.env.N8N_RAG_WEBHOOK_URL || "";
-  const driveFolderId = process.env.N8N_DRIVE_FOLDER_ID || "";
+  const webhook = (process.env.N8N_RAG_WEBHOOK_URL || "").trim();
+  const driveFolderId = (process.env.N8N_DRIVE_FOLDER_ID || "").trim();
   if (!webhook || !driveFolderId) return { driveCatalog: [] as string[] };
 
   try {
@@ -137,7 +137,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const key = process.env.GEMINI_API_KEY || "";
+    const key = (process.env.GEMINI_API_KEY || "").trim();
     if (!key) {
       res.status(200).json({
         ok: true,
@@ -156,7 +156,7 @@ export default async function handler(req: any, res: any) {
       .join("\n");
 
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim(),
       contents:
         "Você é o Consultor Casaboni, consultor de vendas online. Responda em português, com objetividade e tom comercial.\n\n" +
         conversation,
@@ -170,4 +170,3 @@ export default async function handler(req: any, res: any) {
     });
   }
 }
-
