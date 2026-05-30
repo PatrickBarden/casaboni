@@ -106,6 +106,7 @@ function extractEmail(text: string) {
 
 function extractName(text: string) {
   const compact = text.replace(/\s+/g, " ").trim();
+  const normalizedCompact = normalizeText(compact);
   const patterns = [
     /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
     /\bnome\s*[:\-]\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
@@ -121,6 +122,23 @@ function extractName(text: string) {
       .trim();
 
     if (cleaned.length >= 3) return cleaned;
+  }
+
+  const normalizedMatch = normalizedCompact.match(
+    /meu nome(?:\s+e)?\s*[:\-]?\s*([a-z'\s]{3,80})/i
+  );
+  if (normalizedMatch?.[1]) {
+    const cleaned = normalizedMatch[1]
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|as|e meu|meu)\b/i)[0]
+      .replace(/[,.!?]+$/g, "")
+      .trim();
+    if (cleaned.length >= 3) {
+      return cleaned
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+    }
   }
 
   return "";
