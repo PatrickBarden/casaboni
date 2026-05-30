@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+﻿import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, Send, MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -73,7 +73,7 @@ function extractDriveImagePreviews(text: string): DriveImagePreview[] {
       .replace(/\s*-\s*https?:\/\/drive\.google\.com\/file\/d\/[^\s]+/i, "")
       .trim();
 
-    const label = (pendingLabel || inlineLabel || "Imagem do catalogo").replace(/^\d+\.\s*/, "").trim();
+    const label = (pendingLabel || inlineLabel || "Imagem do catálogo").replace(/^\d+\.\s*/, "").trim();
     pendingLabel = "";
 
     previews.push({
@@ -143,7 +143,7 @@ export default function ChatAgent() {
             id: String(m.id || ""),
             sourceUrl: String(m.sourceUrl || ""),
             thumbnailUrl: String(m.thumbnailUrl || ""),
-            label: String(m.label || "Imagem do catalogo"),
+            label: String(m.label || "Imagem do catálogo"),
           }))
             .filter((m: DriveImagePreview) => m.id && m.thumbnailUrl)
         : [];
@@ -151,7 +151,7 @@ export default function ChatAgent() {
       setMessages((prev) => [...prev, { role: "bot", text: safeReply, media }]);
     } catch (error) {
       console.error("Chat error:", error);
-      setMessages((prev) => [...prev, { role: "bot", text: "Tive um pequeno problema tecnico. Pode me chamar no WhatsApp se preferir!" }]);
+      setMessages((prev) => [...prev, { role: "bot", text: "Tive um pequeno problema técnico. Pode me chamar no WhatsApp se preferir!" }]);
     } finally {
       setIsTyping(false);
       isProcessing.current = false;
@@ -274,3 +274,4 @@ export default function ChatAgent() {
     </>
   );
 }
+

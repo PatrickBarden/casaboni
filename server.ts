@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -39,7 +39,7 @@ function isPhotoIntent(text: string) {
     normalized.includes("fotos") ||
     normalized.includes("imagem") ||
     normalized.includes("imagens") ||
-    normalized.includes("catalogo") ||
+    normalized.includes("catálogo") ||
     normalized.includes("portifolio") ||
     normalized.includes("portfolio")
   );
@@ -164,7 +164,7 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
       ? { mode: "selected" as const, selected, intro: `Perfeito! Separei as fotos da linha ${matchedModel}.` }
       : {
           mode: "none" as const,
-          reply: `Nao encontrei foto da linha ${matchedModel} no Drive agora. Posso te mandar as linhas mais proximas disponiveis?`,
+          reply: `Não encontrei foto da linha ${matchedModel} no Drive agora. Posso te mandar as linhas mais próximas disponíveis?`,
         };
   }
 
@@ -260,7 +260,7 @@ Seu estilo:
 1. Curto e direto (2-3 frases na maioria dos casos).
 2. Conversa consultiva: fazer uma pergunta por vez para orientar a escolha.
 3. Texto simples, sem excesso de formatacao.
-4. Se o cliente pedir fotos/imagens/catalogo, nunca despejar todo o catalogo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
+4. Se o cliente pedir fotos/imagens/catálogo, nunca despejar todo o catálogo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
 5. Nunca limitar atendimento apenas a pisos.
 6. Falar sempre em portugues do Brasil (pt-BR) e considerar horario de Brasilia (America/Sao_Paulo) para saudacoes.
 
@@ -370,8 +370,8 @@ function extractEmail(text: string) {
 
 function extractName(text: string) {
   const patterns = [
-    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([a-zA-ZÀ-ÿ'\s]{3,80})/i,
-    /nome\s*[:\-]\s*([a-zA-ZÀ-ÿ'\s]{3,80})/i,
+    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([\p{L}'\s]{3,80})/iu,
+    /nome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -553,7 +553,7 @@ async function chatWithGemini(input: {
           } else if (call.name === "scheduleMeeting") {
             toolResults.push(await scheduleMeeting(call.args));
           } else {
-            toolResults.push(`Funcao nao suportada: ${call.name}`);
+            toolResults.push(`Função não suportada: ${call.name}`);
           }
         } catch (error) {
           toolResults.push(
@@ -706,3 +706,6 @@ async function startServer() {
 }
 
 startServer();
+
+
+

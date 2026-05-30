@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+﻿import { initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
   getAuth,
@@ -134,13 +134,13 @@ export const loginWithGoogle = async () => {
 export function getFirebaseAuthErrorMessage(error: unknown) {
   const code = (error as any)?.code as string | undefined;
   if (code === "auth/unauthorized-domain") {
-    return "Dominio nao autorizado no Firebase Auth. Adicione localhost em Authentication > Settings > Authorized domains.";
+    return "Domínio não autorizado no Firebase Auth. Adicione localhost em Authentication > Settings > Authorized domains.";
   }
   if (code === "auth/operation-not-allowed") {
     return "Login Google desabilitado no Firebase. Ative em Authentication > Sign-in method.";
   }
   if (code === "auth/popup-closed-by-user") {
-    return "Popup de login foi fechado antes da conclusao.";
+    return "Popup de login foi fechado antes da conclusão.";
   }
   if (code === "auth/popup-blocked") {
     return "Popup bloqueado pelo navegador. Permita popups/cookies ou abra o painel em Chrome/Edge (fora do navegador interno).";
@@ -149,7 +149,9 @@ export function getFirebaseAuthErrorMessage(error: unknown) {
     return "Solicitação de popup cancelada. Tente novamente em navegador comum (Chrome/Edge).";
   }
   if (code === "auth/web-storage-unsupported") {
-    return "Este navegador nao suporta o armazenamento exigido pelo Firebase Auth. Abra o painel em Chrome/Edge.";
+    return "Este navegador não suporta o armazenamento exigido pelo Firebase Auth. Abra o painel em Chrome/Edge.";
   }
   return `Falha no login Google${code ? ` (${code})` : ""}.`;
 }
+
+
