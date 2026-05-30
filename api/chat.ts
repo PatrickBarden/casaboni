@@ -1,7 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { initializeApp } from "firebase/app";
 import { addDoc, collection, getFirestore, serverTimestamp } from "firebase/firestore";
-import firebaseAppletConfig from "../firebase-applet-config.json";
 
 type ChatMessage = { role: "user" | "bot"; text: string };
 type ProductCategory = "pisos" | "rodapes" | "telhas" | "ripados";
@@ -9,18 +8,20 @@ type CatalogEntry = { label: string; url: string };
 type ChatMedia = { id: string; label: string; sourceUrl: string; thumbnailUrl: string };
 
 const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey || "",
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain || "",
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || "",
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket || "",
+  apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyDt0kyR-e6vTyMIPeCfxusPDedv6RnxcLs",
+  authDomain:
+    process.env.VITE_FIREBASE_AUTH_DOMAIN || "gen-lang-client-0033143716.firebaseapp.com",
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0033143716",
+  storageBucket:
+    process.env.VITE_FIREBASE_STORAGE_BUCKET || "gen-lang-client-0033143716.firebasestorage.app",
   messagingSenderId:
-    process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId || "",
-  appId: process.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId || "",
-  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseAppletConfig.measurementId || "",
+    process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "531996248416",
+  appId: process.env.VITE_FIREBASE_APP_ID || "1:531996248416:web:2f8500bd1d453813d57605",
+  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || "",
 };
 
 const firestoreDatabaseId =
-  process.env.VITE_FIREBASE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId || "";
+  process.env.VITE_FIREBASE_DATABASE_ID || "ai-studio-f582f4de-81c3-4a0f-84f5-9a75b5fd666e";
 
 const hasFirebaseConfig = Boolean(
   firebaseConfig.projectId && firebaseConfig.apiKey && firebaseConfig.appId
