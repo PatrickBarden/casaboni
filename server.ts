@@ -433,6 +433,71 @@ function hasLeadIntent(text: string) {
   return /salvar|cadastro|cadastrar|contato|whatsapp/.test(text.toLowerCase());
 }
 
+type ProductCategory = "pisos" | "rodapes" | "telhas" | "ripados";
+
+function detectCategory(text: string): ProductCategory | null {
+  const normalized = normalizeText(text);
+  if (normalized.includes("piso") || normalized.includes("vinil")) return "pisos";
+  if (normalized.includes("rodape")) return "rodapes";
+  if (normalized.includes("telha") || normalized.includes("shingle")) return "telhas";
+  if (normalized.includes("ripado") || normalized.includes("wpc")) return "ripados";
+  return null;
+}
+
+function isGreeting(text: string) {
+  const normalized = normalizeText(text).trim();
+  const short = normalized.split(/\s+/).length <= 3;
+  return short && /^(oi|ola|bom dia|boa tarde|boa noite|e ai|opa|hello)$/.test(normalized);
+}
+
+function hasPriceIntent(text: string) {
+  return /preco|valor|orcamento|orçamento|quanto custa|preço/.test(normalizeText(text));
+}
+
+function extractArea(text: string) {
+  const match = text.match(/\b(\d{1,4})\s*(m2|m²|metros?)\b/i);
+  if (!match) return "";
+  return `${match[1]}m²`;
+}
+
+function summarizeUserHistory(history: ChatMessage[]) {
+  const text = history
+    .filter((m) => m.role === "user")
+    .slice(-6)
+    .map((m) => m.text)
+    .join(" ");
+  return {
+    category: detectCategory(text),
+    environment: extractEnvironment(text),
+    area: extractArea(text),
+  };
+}
+
+function buildGuidedConsultingReply(message: string, history: ChatMessage[]) {
+  const hist = summarizeUserHistory(history);
+  const category = detectCategory(message) || hist.category;
+  const environment = extractEnvironment(message) || hist.environment;
+  const area = extractArea(message) || hist.area;
+
+  if (isGreeting(message)) {
+    return "Olá! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapés, telhas ou ripados. Qual categoria você quer analisar primeiro?";
+  }
+
+  if (hasPriceIntent(message) && !category) {
+    return "Consigo te orientar com orçamento. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
+  }
+
+  if (category && !environment) {
+    return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
+  }
+
+  if (category && environment && !area) {
+    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+  }
+
+  return "";
+}
+
 async function fetchRagContext(message: string, customerContext?: string) {
   const webhookUrl = process.env.N8N_RAG_WEBHOOK_URL;
   const driveFolderId = process.env.N8N_DRIVE_FOLDER_ID || "";
@@ -483,6 +548,17 @@ export async function chatWithGemini(input: {
     return {
       reply: photoReply.reply,
       media: photoReply.media,
+      rag: {
+        filesFound: ragContext.filesFound,
+        driveCatalog: ragContext.driveCatalog,
+      },
+    };
+  }
+
+  const guidedReply = buildGuidedConsultingReply(input.message, input.history);
+  if (guidedReply) {
+    return {
+      reply: guidedReply,
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -556,8 +632,11 @@ export async function chatWithGemini(input: {
     const chat = ai.chats.create({
       model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       config: {
+        temperature: 0.2,
+        maxOutputTokens: 320,
         systemInstruction:
           BASE_SYSTEM_INSTRUCTION +
+          "\n\nRegras de resposta obrigatórias: nunca inventar produto/preço/prazo, manter continuidade com histórico e fazer apenas 1 pergunta por vez quando faltar contexto." +
           (ragContext.ragPromptContext
             ? `\n\nContexto RAG do Drive:\n${ragContext.ragPromptContext}`
             : ""),
