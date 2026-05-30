@@ -105,15 +105,22 @@ function extractEmail(text: string) {
 }
 
 function extractName(text: string) {
+  const compact = text.replace(/\s+/g, " ").trim();
   const patterns = [
-    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([\p{L}'\s]{3,80})/iu,
-    /nome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
+    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
+    /\bnome\s*[:\-]\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
   ];
 
   for (const pattern of patterns) {
-    const match = text.match(pattern);
+    const match = compact.match(pattern);
     if (!match) continue;
-    return match[1].split(/[,.!?\n]/)[0].trim();
+
+    const cleaned = match[1]
+      .split(/\b(?:whatsapp|telefone|celular|email|data|horario|às|as|e meu|meu)\b/i)[0]
+      .replace(/[,.!?]+$/g, "")
+      .trim();
+
+    if (cleaned.length >= 3) return cleaned;
   }
 
   return "";
@@ -411,6 +418,20 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    if (hasMeetingIntent(message) && (!maybeName || !maybeEmail || !maybeDate || !maybeTime)) {
+      const missing: string[] = [];
+      if (!maybeName) missing.push("nome");
+      if (!maybeEmail) missing.push("email");
+      if (!maybeDate) missing.push("data (YYYY-MM-DD)");
+      if (!maybeTime) missing.push("horario (HH:MM)");
+      res.status(200).json({
+        ok: true,
+        reply: `Perfeito, eu agendo para voce. Me confirme: ${missing.join(", ")}.`,
+        media: [],
+      });
+      return;
+    }
+
     if ((hasLeadIntent(message) || maybePhone) && maybeName && maybePhone) {
       try {
         await saveLead({
@@ -426,6 +447,16 @@ export default async function handler(req: any, res: any) {
       res.status(200).json({
         ok: true,
         reply: `Perfeito, ${maybeName}. Seus dados ja foram cadastrados. Agora me diga o ambiente e a metragem para eu indicar a melhor linha.`,
+        media: [],
+      });
+      return;
+    }
+
+    if ((hasLeadIntent(message) || maybePhone) && (!maybeName || !maybePhone)) {
+      const missingLead = !maybeName ? "nome completo" : "telefone/WhatsApp";
+      res.status(200).json({
+        ok: true,
+        reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`,
         media: [],
       });
       return;
