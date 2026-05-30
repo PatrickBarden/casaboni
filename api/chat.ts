@@ -108,7 +108,7 @@ function extractName(text: string) {
   const compact = text.replace(/\s+/g, " ").trim();
   const normalizedCompact = normalizeText(compact);
   const patterns = [
-    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
+    /meu nome[^a-zA-Z0-9]{0,8}\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
     /\bnome\s*[:\-]\s*([A-Za-zÀ-ÿ'\s]{3,80})/i,
   ];
 
