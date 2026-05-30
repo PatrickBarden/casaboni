@@ -33,13 +33,13 @@ type ChatMedia = {
 };
 
 function isPhotoIntent(text: string) {
-  const normalized = text.toLowerCase();
+  const normalized = normalizeText(text);
   return (
     normalized.includes("foto") ||
     normalized.includes("fotos") ||
     normalized.includes("imagem") ||
     normalized.includes("imagens") ||
-    normalized.includes("catÃ¡logo") ||
+    normalized.includes("catalogo") ||
     normalized.includes("portifolio") ||
     normalized.includes("portfolio")
   );
@@ -155,14 +155,14 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
   const askClarification = {
     mode: "clarify" as const,
     reply:
-      "Tenho fotos de pisos, rodapÃ©s, telhas shingle e ripados. Qual produto vocÃª quer ver primeiro?",
+      "Tenho fotos de pisos, rodapés, telhas shingle e ripados. Qual produto você quer ver primeiro?",
   };
 
   if (!catalog.length) {
     return {
       mode: "empty" as const,
       reply:
-        "Ainda nÃ£o encontrei imagens no catÃ¡logo do Drive. Posso te enviar o portfÃ³lio geral enquanto isso?",
+        "Ainda não encontrei imagens no catálogo do Drive. Posso te enviar o portfólio geral enquanto isso?",
     };
   }
 
@@ -174,7 +174,7 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
       ? { mode: "selected" as const, selected, intro: `Perfeito! Separei as fotos da linha ${matchedModel}.` }
       : {
           mode: "none" as const,
-          reply: `NÃ£o encontrei foto da linha ${matchedModel} no Drive agora. Posso te mandar as linhas mais prÃ³ximas disponÃ­veis?`,
+          reply: `Não encontrei foto da linha ${matchedModel} no Drive agora. Posso te mandar as linhas mais próximas disponíveis?`,
         };
   }
 
@@ -198,7 +198,7 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
             mode: "selected" as const,
             selected,
             intro:
-              "Claro. Separei um recorte visual do portfolio para voce folhear primeiro. Depois me diga qual ambiente voce quer renovar.",
+              "Claro. Separei um recorte visual do portfólio para você folhear primeiro. Depois me diga qual ambiente você quer renovar.",
           }
         : askClarification;
     }
@@ -225,14 +225,14 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
     return {
       mode: "none" as const,
       reply:
-        "NÃ£o achei foto especÃ­fica dessa categoria no Drive agora. Posso te enviar o portfÃ³lio completo e te orientar pela linha ideal.",
+        "Não achei foto específica dessa categoria no Drive agora. Posso te enviar o portfólio completo e te orientar pela linha ideal.",
     };
   }
 
   return {
     mode: "selected" as const,
     selected: dedup.slice(0, 6),
-    intro: "Perfeito! Separei as fotos do produto que vocÃª pediu.",
+    intro: "Perfeito! Separei as fotos do produto que você pediu.",
   };
 }
 
@@ -245,13 +245,13 @@ function buildQuotaFallbackReply(message: string, rag: { driveCatalog: string[] 
   }
 
   if (hasExplorationIntent(message)) {
-    return "Super normal ter essa duvida. Se quiser, comecamos com um panorama rapido do portfolio e eu te guio sem pressa. E para casa ou apartamento?";
+    return "Super normal ter essa dúvida. Se quiser, começamos com um panorama rápido do portfólio e eu te guio sem pressa. É para casa ou apartamento?";
   }
 
   return [
-    "A Casaboni trabalha com portfÃ³lio completo de acabamentos, nÃ£o apenas pisos.",
-    "Hoje atuamos com pisos vinÃ­licos clicados, rodapÃ©s de poliestireno, telhas shingle e ripados WPC.",
-    "Para te orientar melhor, qual ambiente vocÃª quer transformar e qual dessas categorias te interessa primeiro?",
+    "A Casaboni trabalha com portfólio completo de acabamentos, não apenas pisos.",
+    "Hoje atuamos com pisos vinílicos clicados, rodapés de poliestireno, telhas shingle e ripados WPC.",
+    "Para te orientar melhor, qual ambiente você quer transformar e qual dessas categorias te interessa primeiro?",
   ].join(" ");
 }
 
@@ -310,7 +310,7 @@ Seu estilo:
 6. Se o cliente nao souber a metragem, ofereca caminho alternativo (faixa de tamanho: pequeno/medio/grande) e continue o atendimento.
 7. Depois de entender necessidade, indique opcoes de forma filtrada (1 a 3 opcoes), nao lista extensa.
 8. Em momento oportuno, colete nome e WhatsApp de forma sutil para continuar o atendimento.
-9. Se o cliente pedir fotos/imagens/catÃ¡logo, nunca despejar todo o catÃ¡logo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
+9. Se o cliente pedir fotos/imagens/catalogo, nunca despejar todo o catalogo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
 10. Nunca limitar atendimento apenas a pisos.
 11. Falar sempre em portugues do Brasil (pt-BR) e considerar horario de Brasilia (America/Sao_Paulo) para saudacoes.
 
@@ -486,8 +486,8 @@ function extractEnvironment(text: string) {
   if (normalized.includes("sala")) return "Sala";
   if (normalized.includes("quarto")) return "Quarto";
   if (normalized.includes("cozinha")) return "Cozinha";
-  if (normalized.includes("escritorio")) return "Escritório";
-  if (normalized.includes("area gourmet")) return "Área Gourmet";
+  if (normalized.includes("escritorio")) return "Escrit\u00f3rio";
+  if (normalized.includes("area gourmet")) return "\u00c1rea Gourmet";
   if (normalized.includes("comercial")) return "Comercial";
   return "";
 }
@@ -525,26 +525,31 @@ function isGreeting(text: string) {
 }
 
 function hasPriceIntent(text: string) {
-  return /preco|valor|orcamento|orÃ§amento|quanto custa|preÃ§o/.test(normalizeText(text));
+  return /preco|valor|orcamento|quanto custa/.test(normalizeText(text));
 }
 
 function hasExplorationIntent(text: string) {
   const normalized = normalizeText(text);
   const raw = text.toLowerCase();
   return (
-    /nao sei bem|nao sei o que|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
+    /nao sei bem|nao sei o que|nao sei escolher|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
       normalized
-    ) || /n.o sei bem|n.o sei o que|duvid/.test(raw)
+    ) || /n.o sei bem|n.o sei o que|n.o sei escolher|duvid/.test(raw)
   );
 }
 
 function hasUnknownAreaIntent(text: string) {
   const normalized = normalizeText(text);
   const raw = text.toLowerCase();
+  const mentionsAreaContext =
+    /metragem|medida|area|m2|m²|metro/.test(normalized) || /\b\d+\s*m(?:2|²)?\b/i.test(raw);
   return (
-    /nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia|sem metragem|sem medida/.test(
+    /sem metragem|sem medida/.test(normalized) ||
+    (/nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia/.test(
       normalized
-    ) || /n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw)
+    ) &&
+      mentionsAreaContext) ||
+    (/n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw) && mentionsAreaContext)
   );
 }
 
@@ -554,7 +559,7 @@ function extractStyle(text: string) {
   if (/(moderno|minimal|clean|contemporane)/.test(normalized)) return "moderno";
   if (/(claro|bege|off white|off-white|branco)/.test(normalized)) return "claro";
   if (/(escuro|grafite|cinza|preto)/.test(normalized)) return "escuro";
-  if (/(rustic|rÃºstic|natural)/.test(normalized)) return "rÃºstico";
+  if (/(rustic|rustico|natural)/.test(normalized)) return "r\u00fastico";
   return "";
 }
 
@@ -577,11 +582,11 @@ function parseAreaNumber(area: string) {
 function extractArea(text: string) {
   const normalized = normalizeText(text).trim();
   const directNumber = normalized.match(/^(\d{1,4})([.,]\d{1,2})?$/);
-  if (directNumber) return `${directNumber[1]}mÂ²`;
+  if (directNumber) return `${directNumber[1]}m²`;
 
-  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|mÂ²|m|metros?|metro)\b/i);
+  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|m²|m|metros?|metro)\b/i);
   if (!match) return "";
-  return `${match[1]}mÂ²`;
+  return `${match[1]}m²`;
 }
 
 function summarizeUserHistory(history: ChatMessage[]) {
@@ -603,7 +608,7 @@ function summarizeUserHistory(history: ChatMessage[]) {
     area: extractArea(text),
     areaBand: extractAreaBand(text),
     style: extractStyle(text),
-    botAskedArea: /metragem|mÂ²|m2/.test(normalizeText(lastBotText)),
+    botAskedArea: /metragem|m²|m2/.test(normalizeText(lastBotText)),
     botEnvironment: extractEnvironment(lastBotText),
     greeted: history.some(
       (m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")
@@ -620,7 +625,6 @@ function buildGuidedConsultingReply(message: string, history: ChatMessage[]) {
   const areaBand = extractAreaBand(message) || hist.areaBand;
   const style = extractStyle(message) || hist.style;
   const areaNumber = parseAreaNumber(area);
-  const messageNormalized = normalizeText(message);
   const likelyAreaTypingMistake =
     !!area &&
     areaNumber > 0 &&
@@ -629,65 +633,78 @@ function buildGuidedConsultingReply(message: string, history: ChatMessage[]) {
 
   if (isGreeting(message)) {
     if (hist.greeted && category && environment && !area) {
-      return "Perfeito, seguimos juntos. Se vocÃª nÃ£o tiver a metragem exata, eu te ajudo por faixa: atÃ© 20mÂ², 20 a 50mÂ² ou acima de 50mÂ².";
+      return "Perfeito, seguimos juntos. Se você não tiver a metragem exata, eu te ajudo por faixa: até 20m², 20 a 50m² ou acima de 50m².";
     }
-    return "OlÃ¡! Sou o Consultor Casaboni. Estou aqui para te atender e te ajudar a escolher a melhor soluÃ§Ã£o para seu ambiente. Qual espaÃ§o vocÃª quer transformar hoje?";
+    return "Olá! Sou o Consultor Casaboni. Estou aqui para te atender e te ajudar a escolher a melhor solução para seu ambiente. Qual espaço você quer transformar hoje?";
   }
 
   if (hasPriceIntent(message) && !category) {
-    return "Consigo te orientar com orÃ§amento. Primeiro me diga a categoria: pisos, rodapÃ©s, telhas ou ripados.";
+    return "Consigo te orientar com orçamento. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
+  }
+
+  if (hasExplorationIntent(message) && environment && !category) {
+    return `Essa dúvida é normal. Para ${environment}, a gente pode começar pelo que mais muda a sensação do ambiente: piso, rodapé, ripado ou telha. Quer folhear um recorte do portfólio para comparar estilos antes de decidir?`;
   }
 
   if (hasExplorationIntent(message) && !category) {
-    return "Super normal ter essa duvida, e eu te ajudo sem pressa. Se quiser, eu te mostro um resumo visual do portfolio primeiro; antes disso, me diz: e para casa ou apartamento?";
+    return "Super normal ter essa dúvida, e eu te ajudo sem pressa. Se quiser, eu te mostro um resumo visual do portfólio primeiro; antes disso, me diz: é casa ou apartamento?";
+  }
+
+  if (hasExplorationIntent(message) && category && environment && area) {
+    const productLabel = category === "pisos" ? "piso" : category;
+    return `Sem problema, escolher ${productLabel} costuma gerar dúvida mesmo. Para ${environment} com ${area}, eu começaria comparando 2 ou 3 estilos: claro, amadeirado e moderno. Quer que eu te mostre um recorte visual do portfólio para você sentir qual combina mais?`;
+  }
+
+  if (hasExplorationIntent(message) && category && environment) {
+    return `Sem problema, eu te ajudo a escolher com calma. Para ${environment}, primeiro vale pensar no efeito que você quer: mais aconchegante, mais claro ou mais moderno. Quer folhear algumas opções do portfólio para sentir o estilo?`;
   }
 
   if (propertyType && !category && !environment) {
-    return `Perfeito, ${propertyType}. Qual ambiente voce mais usa no dia a dia e quer renovar primeiro? Se preferir, tambem te mostro um recorte do portfolio para inspirar.`;
+    return `Perfeito, ${propertyType}. Qual ambiente você mais usa no dia a dia e quer renovar primeiro? Se preferir, também te mostro um recorte do portfólio para inspirar.`;
   }
 
   if (hasUnknownAreaIntent(message) && (hist.botAskedArea || (category && environment && !area))) {
-    return "Sem problema. Podemos seguir sem medida exata: me diga se esse ambiente Ã© pequeno, mÃ©dio ou grande que eu jÃ¡ te indico opÃ§Ãµes certeiras.";
+    return "Sem problema. Podemos seguir sem medida exata: me diga se esse ambiente é pequeno, médio ou grande que eu já te indico opções certeiras.";
   }
 
   if (!category && environment && !area) {
-    return `Perfeito, ${environment}. Para eu te indicar com precisÃ£o, vocÃª quer pisos, rodapÃ©s, telhas shingle ou ripados?`;
+    return `Perfeito, ${environment}. Para eu te indicar com precisão, você quer pisos, rodapés, telhas shingle ou ripados?`;
   }
 
   if (area && environment && !category) {
-    return `Perfeito, ${environment} com ${area}. Para eu te indicar com precisÃ£o, vocÃª quer pisos, rodapÃ©s, telhas shingle ou ripados?`;
+    return `Perfeito, ${environment} com ${area}. Para eu te indicar com precisão, você quer pisos, rodapés, telhas shingle ou ripados?`;
   }
 
   if (area && !environment && category) {
-    return `Perfeito, jÃ¡ anotei ${area}. Para ${category}, qual ambiente vocÃª quer transformar?`;
+    return `Perfeito, já anotei ${area}. Para ${category}, qual ambiente você quer transformar?`;
   }
 
   if (category && !environment) {
-    return `Perfeito. Para ${category}, qual ambiente vocÃª quer transformar?`;
+    return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
   }
 
   if (category && environment && !area) {
     if (areaBand) {
-      const bandLabel = areaBand === "medio" ? "mÃ©dio" : areaBand;
+      const bandLabel = areaBand === "medio" ? "médio" : areaBand;
       if (!style) {
-        return `Perfeito, ${environment} de porte ${bandLabel}. VocÃª prefere um visual mais claro, amadeirado, moderno ou rÃºstico?`;
+        return `Perfeito, ${environment} de porte ${bandLabel}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
       }
-      return `Excelente. Para ${environment} de porte ${bandLabel} e estilo ${style}, eu jÃ¡ consigo te mostrar opÃ§Ãµes mais alinhadas e o prÃ³ximo passo de orÃ§amento.`;
+      return `Excelente. Para ${environment} de porte ${bandLabel} e estilo ${style}, eu já consigo te mostrar opções mais alinhadas e o próximo passo de orçamento.`;
     }
-    if (hasUnknownAreaIntent(message) || /nao lembro|nao sei|sem metragem/.test(messageNormalized)) {
-      return "Sem problema. Podemos comeÃ§ar sem a metragem exata. Me diga se o ambiente Ã© pequeno, mÃ©dio ou grande que eu jÃ¡ te indico opÃ§Ãµes mais assertivas.";
+    if (hasUnknownAreaIntent(message)) {
+      return "Sem problema. Podemos começar sem a metragem exata. Me diga se o ambiente é pequeno, médio ou grande que eu já te indico opções mais assertivas.";
     }
-    return `Ã“timo, ${environment}. Qual a metragem aproximada em mÂ² para eu te orientar com mais precisÃ£o?`;
+    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
   }
 
   if (category && environment && area) {
     if (likelyAreaTypingMistake) {
-      return `Perfeito, ${environment}. SÃ³ confirmando para eu nÃ£o errar na indicaÃ§Ã£o: sÃ£o ${area} mesmo ou seria ${areaNumber}0mÂ²?`;
+      return `Perfeito, ${environment}. Só confirmando para eu não errar na indicação: são ${area} mesmo ou seria ${areaNumber}0m²?`;
     }
     if (!style) {
-      return `Perfeito, ${environment} com ${area}. VocÃª prefere um visual mais claro, amadeirado, moderno ou rÃºstico?`;
+      return `Perfeito, ${environment} com ${area}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
     }
-    return `Excelente. Para ${environment} com ${area} e estilo ${style}, eu jÃ¡ consigo te mostrar as opÃ§Ãµes mais alinhadas e o prÃ³ximo passo de orÃ§amento.`;
+    return `Excelente. Para ${environment} com ${area} e estilo ${style}, eu já consigo te mostrar as opções mais alinhadas e o próximo passo de orçamento.`;
   }
 
   return "";
@@ -765,13 +782,13 @@ export async function chatWithGemini(input: {
         phone: maybePhone,
         date: maybeDate,
         time: maybeTime,
-        topic: "Consultoria TÃ©cnica",
+        topic: "Consultoria T\u00e9cnica",
       });
     } catch (error) {
       console.error("Deterministic scheduleMeeting fallback error:", error);
     }
     return {
-      reply: `Perfeito, ${maybeName}. reuniao agendada para ${maybeDate} Ã s ${maybeTime}. Se quiser, jÃ¡ me diga o ambiente e a metragem para adiantarmos a consultoria.`,
+      reply: `Perfeito, ${maybeName}. Reunião agendada para ${maybeDate} às ${maybeTime}. Se quiser, já me diga o ambiente e a metragem para adiantarmos a consultoria.`,
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -791,7 +808,7 @@ export async function chatWithGemini(input: {
       console.error("Deterministic saveLead fallback error:", error);
     }
     return {
-      reply: `Perfeito, ${maybeName}. Seus dados jÃ¡ foram cadastrados com sucesso. Para eu te indicar a melhor linha, qual ambiente vocÃª quer transformar?`,
+      reply: `Perfeito, ${maybeName}. Seus dados já foram cadastrados com sucesso. Para eu te indicar a melhor linha, qual ambiente você quer transformar?`,
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -842,7 +859,7 @@ export async function chatWithGemini(input: {
         maxOutputTokens: 320,
         systemInstruction:
           BASE_SYSTEM_INSTRUCTION +
-          "\n\nRegras de resposta obrigatÃ³rias: nunca inventar produto/preÃ§o/prazo, manter continuidade com histÃ³rico e fazer apenas 1 pergunta por vez quando faltar contexto." +
+          "\n\nRegras de resposta obrigatórias: nunca inventar produto/preço/prazo, manter continuidade com histórico e fazer apenas 1 pergunta por vez quando faltar contexto." +
           (ragContext.ragPromptContext
             ? `\n\nContexto RAG do Drive:\n${ragContext.ragPromptContext}`
             : ""),
@@ -871,7 +888,7 @@ export async function chatWithGemini(input: {
           } else if (call.name === "scheduleMeeting") {
             toolResults.push(await scheduleMeeting(call.args));
           } else {
-            toolResults.push(`FunÃ§Ã£o nÃ£o suportada: ${call.name}`);
+            toolResults.push(`Função não suportada: ${call.name}`);
           }
         } catch (error) {
           toolResults.push(
@@ -924,7 +941,7 @@ export async function chatWithGemini(input: {
     return {
       reply:
         photoReply?.reply ||
-        "Estou aqui para te ajudar com pisos, rodapÃ©s, telhas e ripados. Me diga qual ambiente vocÃª quer transformar para eu te orientar no produto ideal.",
+        "Estou aqui para te ajudar com pisos, rodapés, telhas e ripados. Me diga qual ambiente você quer transformar para eu te orientar no produto ideal.",
       media: photoReply?.media || ([] as ChatMedia[]),
       rag: {
         filesFound: ragContext.filesFound,
@@ -1065,7 +1082,3 @@ const isDirectRun =
 if (isDirectRun) {
   startServer();
 }
-
-
-
-

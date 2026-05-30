@@ -77,19 +77,22 @@ function hasExplorationIntent(text: string) {
   const n = normalizeText(text);
   const raw = text.toLowerCase();
   return (
-    /nao sei bem|nao sei o que|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
+    /nao sei bem|nao sei o que|nao sei escolher|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
       n
-    ) || /n.o sei bem|n.o sei o que|duvid/.test(raw)
+    ) || /n.o sei bem|n.o sei o que|n.o sei escolher|duvid/.test(raw)
   );
 }
 
 function hasUnknownAreaIntent(text: string) {
   const n = normalizeText(text);
   const raw = text.toLowerCase();
+  const mentionsAreaContext =
+    /metragem|medida|area|m2|m²|metro/.test(n) || /\b\d+\s*m(?:2|²)?\b/i.test(raw);
   return (
-    /nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia|sem metragem|sem medida/.test(
-      n
-    ) || /n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw)
+    /sem metragem|sem medida/.test(n) ||
+    (/nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia/.test(n) &&
+      mentionsAreaContext) ||
+    (/n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw) && mentionsAreaContext)
   );
 }
 
@@ -422,8 +425,21 @@ function buildGuidedReply(message: string, history: ChatMessage[]) {
     return "Consigo te orientar com orçamento, sim. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
   }
 
+  if (hasExplorationIntent(message) && environment && !category) {
+    return `Essa dúvida é normal. Para ${environment}, a gente pode começar pelo que mais muda a sensação do ambiente: piso, rodapé, ripado ou telha. Quer folhear um recorte do portfólio para comparar estilos antes de decidir?`;
+  }
+
   if (hasExplorationIntent(message) && !category) {
     return "Super normal ter essa dúvida, e eu te ajudo sem pressa. Se quiser, eu te mostro um resumo visual do portfólio primeiro; antes disso, me diz: é casa ou apartamento?";
+  }
+
+  if (hasExplorationIntent(message) && category && environment && area) {
+    const productLabel = category === "pisos" ? "piso" : category;
+    return `Sem problema, escolher ${productLabel} costuma gerar dúvida mesmo. Para ${environment} com ${area}, eu começaria comparando 2 ou 3 estilos: claro, amadeirado e moderno. Quer que eu te mostre um recorte visual do portfólio para você sentir qual combina mais?`;
+  }
+
+  if (hasExplorationIntent(message) && category && environment) {
+    return `Sem problema, eu te ajudo a escolher com calma. Para ${environment}, primeiro vale pensar no efeito que você quer: mais aconchegante, mais claro ou mais moderno. Quer folhear algumas opções do portfólio para sentir o estilo?`;
   }
 
   if (propertyType && !category && !environment) {
