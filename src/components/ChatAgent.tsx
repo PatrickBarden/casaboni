@@ -79,7 +79,7 @@ function extractDriveImagePreviews(text: string): DriveImagePreview[] {
     previews.push({
       id,
       sourceUrl: urlMatch[0],
-      thumbnailUrl: `/api/drive-image/${id}`,
+      thumbnailUrl: `/api/drive-image?id=${id}`,
       label,
     });
   }
@@ -226,7 +226,7 @@ export default function ChatAgent() {
                                   const target = e.currentTarget;
                                   if (!target.dataset.fallbackTried) {
                                     target.dataset.fallbackTried = "1";
-                                    target.src = `/api/drive-image/${img.id}?mode=thumb`;
+                                    target.src = `/api/drive-image?id=${img.id}&mode=thumb`;
                                   }
                                 }}
                               />

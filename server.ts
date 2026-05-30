@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 type ChatRole = "user" | "bot";
-interface ChatMessage {
+export interface ChatMessage {
   role: ChatRole;
   text: string;
 }
@@ -72,17 +72,17 @@ function buildMediaFromCatalog(entries: CatalogEntry[]): ChatMedia[] {
         id,
         label: entry.label,
         sourceUrl: entry.url,
-        thumbnailUrl: `/api/drive-image/${id}`,
+        thumbnailUrl: `/api/drive-image?id=${id}`,
       };
     })
     .filter((item): item is ChatMedia => Boolean(item));
 }
 
-function isValidDriveFileId(id: string) {
+export function isValidDriveFileId(id: string) {
   return /^[a-zA-Z0-9_-]{10,}$/.test(id);
 }
 
-async function fetchDriveImage(id: string, mode: "auto" | "thumb" = "auto") {
+export async function fetchDriveImage(id: string, mode: "auto" | "thumb" = "auto") {
   const urls =
     mode === "thumb"
       ? [`https://drive.google.com/thumbnail?id=${id}&sz=w1200`]
@@ -235,25 +235,38 @@ function buildPhotoReplyFromCatalog(message: string, driveCatalog: string[]) {
   return { reply: picked.reply, media: [] as ChatMedia[] };
 }
 
-const firebaseAppletConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-const firebaseAppletConfig = JSON.parse(fs.readFileSync(firebaseAppletConfigPath, "utf8"));
+const firebaseAppletConfigPath = path.join(__dirname, "firebase-applet-config.json");
+let firebaseAppletConfig: Record<string, string> = {};
+try {
+  firebaseAppletConfig = JSON.parse(fs.readFileSync(firebaseAppletConfigPath, "utf8"));
+} catch (error) {
+  firebaseAppletConfig = {};
+}
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain,
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket,
+export const firebaseConfig = {
+  apiKey: process.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey || "",
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain || "",
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || "",
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket || "",
   messagingSenderId:
-    process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId,
-  appId: process.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId,
-  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseAppletConfig.measurementId,
+    process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId || "",
+  appId: process.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId || "",
+  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseAppletConfig.measurementId || "",
 };
 
-const firestoreDatabaseId =
-  process.env.VITE_FIREBASE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId;
+export const firestoreDatabaseId =
+  process.env.VITE_FIREBASE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId || "";
 
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firestoreDatabaseId);
+const hasFirebaseConfig = Boolean(firebaseConfig.projectId && firebaseConfig.apiKey && firebaseConfig.appId);
+const firebaseApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
+const db = firebaseApp ? getFirestore(firebaseApp, firestoreDatabaseId) : null;
+
+function requireDb() {
+  if (!db) {
+    throw new Error("Firebase config ausente no servidor.");
+  }
+  return db;
+}
 
 const BASE_SYSTEM_INSTRUCTION = `Voce e o "Consultor Casaboni", consultor comercial de vendas online em arquitetura e acabamentos premium.
 Seu estilo:
@@ -320,7 +333,8 @@ function getFunctionDeclarations() {
 }
 
 async function saveLead(args: any) {
-  const ref = await addDoc(collection(db, "leads"), {
+  const dbRef = requireDb();
+  const ref = await addDoc(collection(dbRef, "leads"), {
     name: args?.name || "",
     phone: args?.phone || "",
     environment: args?.environment || "",
@@ -334,7 +348,8 @@ async function saveLead(args: any) {
 }
 
 async function scheduleMeeting(args: any) {
-  const ref = await addDoc(collection(db, "meetings"), {
+  const dbRef = requireDb();
+  const ref = await addDoc(collection(dbRef, "meetings"), {
     customerName: args?.name || "",
     customerEmail: args?.email || "",
     phone: args?.phone || "",
@@ -453,7 +468,7 @@ async function fetchRagContext(message: string, customerContext?: string) {
   }
 }
 
-async function chatWithGemini(input: {
+export async function chatWithGemini(input: {
   message: string;
   history: ChatMessage[];
   customerContext?: string;
@@ -616,13 +631,9 @@ async function chatWithGemini(input: {
   }
 }
 
-async function startServer() {
-  const app = express();
-  const PORT = Number(process.env.PORT || 3000);
-
+export function registerApiRoutes(app: express.Express) {
   app.use(express.json());
 
-  // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
@@ -640,6 +651,33 @@ async function startServer() {
   app.get("/api/drive-image/:id", async (req, res) => {
     try {
       const id = String(req.params.id || "").trim();
+      const mode = req.query.mode === "thumb" ? "thumb" : "auto";
+      if (!isValidDriveFileId(id)) {
+        res.status(400).json({ ok: false, error: "Invalid file id" });
+        return;
+      }
+
+      const image = await fetchDriveImage(id, mode);
+      if (!image) {
+        res.status(404).json({ ok: false, error: "Image not found" });
+        return;
+      }
+
+      res.setHeader("Content-Type", image.contentType);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(image.bytes);
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.get("/api/drive-image", async (req, res) => {
+    try {
+      const idParam = req.query.id;
+      const id = Array.isArray(idParam) ? String(idParam[0] || "").trim() : String(idParam || "").trim();
       const mode = req.query.mode === "thumb" ? "thumb" : "auto";
       if (!isValidDriveFileId(id)) {
         res.status(400).json({ ok: false, error: "Invalid file id" });
@@ -684,6 +722,13 @@ async function startServer() {
       });
     }
   });
+}
+
+export async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT || 3000);
+
+  registerApiRoutes(app);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -705,7 +750,14 @@ async function startServer() {
   });
 }
 
-startServer();
+const isDirectRun =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  startServer();
+}
+
 
 
 
