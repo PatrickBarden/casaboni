@@ -1,8 +1,32 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
+import { initializeApp } from "firebase/app";
+import { addDoc, collection, getFirestore, serverTimestamp } from "firebase/firestore";
+import firebaseAppletConfig from "../firebase-applet-config.json";
 
 type ChatMessage = { role: "user" | "bot"; text: string };
-type CatalogEntry = { label: string; url: string };
 type ProductCategory = "pisos" | "rodapes" | "telhas" | "ripados";
+type CatalogEntry = { label: string; url: string };
+type ChatMedia = { id: string; label: string; sourceUrl: string; thumbnailUrl: string };
+
+const firebaseConfig = {
+  apiKey: process.env.VITE_FIREBASE_API_KEY || firebaseAppletConfig.apiKey || "",
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseAppletConfig.authDomain || "",
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId || "",
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseAppletConfig.storageBucket || "",
+  messagingSenderId:
+    process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseAppletConfig.messagingSenderId || "",
+  appId: process.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId || "",
+  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseAppletConfig.measurementId || "",
+};
+
+const firestoreDatabaseId =
+  process.env.VITE_FIREBASE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId || "";
+
+const hasFirebaseConfig = Boolean(
+  firebaseConfig.projectId && firebaseConfig.apiKey && firebaseConfig.appId
+);
+const firebaseApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
+const db = firebaseApp ? getFirestore(firebaseApp, firestoreDatabaseId) : null;
 
 function normalizeText(text: string) {
   return text
@@ -29,7 +53,15 @@ function isPhotoIntent(text: string) {
 }
 
 function isPriceIntent(text: string) {
-  return /preco|valor|orcamento|orçamento|quanto custa|preço/.test(normalizeText(text));
+  return /preco|valor|orcamento|quanto custa/.test(normalizeText(text));
+}
+
+function hasMeetingIntent(text: string) {
+  return /agendar|reuniao|consultoria/.test(normalizeText(text));
+}
+
+function hasLeadIntent(text: string) {
+  return /salvar|cadastro|cadastrar|contato|whatsapp/.test(normalizeText(text));
 }
 
 function detectCategory(text: string): ProductCategory | null {
@@ -46,17 +78,63 @@ function extractEnvironment(text: string) {
   if (n.includes("sala")) return "Sala";
   if (n.includes("quarto")) return "Quarto";
   if (n.includes("cozinha")) return "Cozinha";
-  if (n.includes("escritorio")) return "Escritório";
+  if (n.includes("escritorio")) return "Escritorio";
   if (n.includes("banheiro")) return "Banheiro";
-  if (n.includes("area gourmet")) return "Área Gourmet";
+  if (n.includes("area gourmet")) return "Area Gourmet";
   if (n.includes("comercial")) return "Comercial";
   return "";
 }
 
 function extractArea(text: string) {
-  const iso = text.match(/\b(\d{1,4})\s*(m2|m²|metros?)\b/i);
-  if (iso) return `${iso[1]}m²`;
+  const match = text.match(/\b(\d{1,4})\s*(m2|m²|metros?)\b/i);
+  if (!match) return "";
+  return `${match[1]}m²`;
+}
+
+function extractPhone(text: string) {
+  const match = text.match(/(\+?\d[\d\s().-]{8,}\d)/);
+  if (!match) return "";
+  const digits = match[1].replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(0, 13) : "";
+}
+
+function extractEmail(text: string) {
+  const match = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,})/i);
+  return match?.[1] || "";
+}
+
+function extractName(text: string) {
+  const patterns = [
+    /meu nome(?:\s+e|\s+é)?\s*[:\-]?\s*([\p{L}'\s]{3,80})/iu,
+    /nome\s*[:\-]\s*([\p{L}'\s]{3,80})/iu,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    return match[1].split(/[,.!?\n]/)[0].trim();
+  }
+
   return "";
+}
+
+function extractDate(text: string) {
+  const iso = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
+
+  const br = text.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
+  if (br) {
+    const [, dd, mm, yyyy] = br;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return "";
+}
+
+function extractTime(text: string) {
+  const match = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (!match) return "";
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
 }
 
 function parseCatalogEntries(lines: string[]) {
@@ -69,7 +147,7 @@ function parseCatalogEntries(lines: string[]) {
   return entries;
 }
 
-function buildMediaFromCatalog(entries: CatalogEntry[]) {
+function buildMediaFromCatalog(entries: CatalogEntry[]): ChatMedia[] {
   return entries
     .map((entry) => {
       const match = entry.url.match(/\/file\/d\/([a-zA-Z0-9_-]+)\//i);
@@ -82,7 +160,7 @@ function buildMediaFromCatalog(entries: CatalogEntry[]) {
         thumbnailUrl: `/api/drive-image?id=${id}`,
       };
     })
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    .filter((item): item is ChatMedia => Boolean(item));
 }
 
 function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
@@ -100,30 +178,41 @@ function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
   const category = detectCategory(message);
   if (!category) {
     return {
-      reply: "Tenho fotos de pisos, rodapés, telhas shingle e ripados. Qual produto você quer ver primeiro?",
+      reply: "Tenho fotos de pisos, rodapes, telhas shingle e ripados. Qual produto voce quer ver primeiro?",
       selected: [],
     };
   }
 
   const selected: CatalogEntry[] = [];
-  const labels = (item: CatalogEntry) => normalizeText(item.label);
+  const label = (item: CatalogEntry) => normalizeText(item.label);
 
   for (const item of catalog) {
-    const l = labels(item);
-    if (category === "rodapes" && l.includes("rodape")) selected.push(item);
-    if (category === "pisos" && models.some((m) => l.includes(m))) selected.push(item);
-    if (category === "telhas" && (l.includes("telha") || l.includes("shingle") || l.includes("portfolio"))) selected.push(item);
-    if (category === "ripados" && (l.includes("ripado") || l.includes("wpc") || l.includes("portfolio"))) selected.push(item);
+    const n = label(item);
+    if (category === "rodapes" && n.includes("rodape")) selected.push(item);
+    if (category === "pisos" && models.some((m) => n.includes(m))) selected.push(item);
+    if (category === "telhas" && (n.includes("telha") || n.includes("shingle") || n.includes("portfolio"))) {
+      selected.push(item);
+    }
+    if (category === "ripados" && (n.includes("ripado") || n.includes("wpc") || n.includes("portfolio"))) {
+      selected.push(item);
+    }
   }
 
-  const dedup = selected.filter((item, idx) => selected.findIndex((x) => x.url === item.url) === idx).slice(0, 6);
+  const dedup = selected
+    .filter((item, idx) => selected.findIndex((x) => x.url === item.url) === idx)
+    .slice(0, 6);
+
   if (!dedup.length) {
     return {
-      reply: "Não encontrei fotos dessa categoria no Drive agora. Posso te apresentar alternativas próximas.",
+      reply: "Nao encontrei fotos dessa categoria no Drive agora. Posso te orientar por outra linha semelhante.",
       selected: [],
     };
   }
-  return { reply: "Perfeito! Separei as fotos do produto que você pediu.", selected: dedup };
+
+  return {
+    reply: "Perfeito! Separei as fotos do produto que voce pediu.",
+    selected: dedup,
+  };
 }
 
 async function fetchRagContext(message: string, customerContext?: string) {
@@ -142,24 +231,34 @@ async function fetchRagContext(message: string, customerContext?: string) {
         customerContext: customerContext || "",
       }),
     });
+
     if (!response.ok) return { driveCatalog: [] as string[] };
+
     const data = await response.json();
-    return { driveCatalog: Array.isArray(data?.driveCatalog) ? data.driveCatalog : [] };
+    return {
+      driveCatalog: Array.isArray(data?.driveCatalog) ? data.driveCatalog : [],
+    };
   } catch {
     return { driveCatalog: [] as string[] };
   }
 }
 
 function contextFromHistory(history: ChatMessage[]) {
-  const lastUser = history
+  const lastUserText = history
     .filter((m) => m.role === "user")
     .slice(-6)
     .map((m) => m.text)
     .join(" ");
+
   return {
-    category: detectCategory(lastUser),
-    environment: extractEnvironment(lastUser),
-    area: extractArea(lastUser),
+    category: detectCategory(lastUserText),
+    environment: extractEnvironment(lastUserText),
+    area: extractArea(lastUserText),
+    greeted: history.some(
+      (m) =>
+        m.role === "bot" &&
+        normalizeText(m.text).includes("sou o consultor casaboni")
+    ),
   };
 }
 
@@ -170,23 +269,35 @@ function buildGuidedReply(message: string, history: ChatMessage[]) {
   const area = extractArea(message) || historyCtx.area;
 
   if (isGreeting(message)) {
-    return "Olá! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapés, telhas ou ripados. Qual categoria você quer analisar primeiro?";
+    if (historyCtx.greeted) {
+      if (!category) {
+        return "Perfeito. Para eu te atender melhor, voce quer ver pisos, rodapes, telhas ou ripados?";
+      }
+      if (category && !environment) {
+        return `Perfeito. Para ${category}, qual ambiente voce quer transformar?`;
+      }
+      if (category && environment && !area) {
+        return `Otimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisao?`;
+      }
+      return "Perfeito. Me diga o proximo detalhe que voce quer analisar e eu te ajudo a decidir.";
+    }
+    return "Ola! Sou o Consultor Casaboni. Posso te ajudar com pisos, rodapes, telhas ou ripados. Qual categoria voce quer analisar primeiro?";
   }
 
   if (isPriceIntent(message) && !category) {
-    return "Consigo te orientar com orçamento, sim. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
+    return "Consigo te orientar com orcamento, sim. Primeiro me diga a categoria: pisos, rodapes, telhas ou ripados.";
   }
 
   if (category && !environment) {
-    return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
+    return `Perfeito. Para ${category}, qual ambiente voce quer transformar?`;
   }
 
   if (category && environment && !area) {
-    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+    return `Otimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisao?`;
   }
 
   if (category && environment && area) {
-    return `Perfeito, para ${environment} com ${area}. Se quiser, já te mostro opções da linha ideal e em seguida te passo o próximo passo comercial.`;
+    return `Perfeito, para ${environment} com ${area}. Se quiser, ja te mostro a linha ideal para esse contexto.`;
   }
 
   return null;
@@ -198,6 +309,48 @@ function sanitizeReply(text: string) {
     .trim();
   if (!clean) return "Pode repetir, por favor?";
   return clean.slice(0, 700);
+}
+
+async function saveLead(args: { name: string; phone: string; environment?: string; area?: string }) {
+  if (!db) return false;
+
+  await addDoc(collection(db, "leads"), {
+    name: args.name,
+    phone: args.phone,
+    environment: args.environment || "",
+    area: args.area || "",
+    date: new Date().toISOString().slice(0, 10),
+    status: "Novo",
+    source: "chat-agent-api",
+    createdAt: serverTimestamp(),
+  });
+
+  return true;
+}
+
+async function scheduleMeeting(args: {
+  name: string;
+  email: string;
+  phone?: string;
+  date: string;
+  time: string;
+  topic?: string;
+}) {
+  if (!db) return false;
+
+  await addDoc(collection(db, "meetings"), {
+    customerName: args.name,
+    customerEmail: args.email,
+    phone: args.phone || "",
+    date: args.date,
+    time: args.time,
+    topic: args.topic || "Consultoria Tecnica",
+    status: "Agendada",
+    source: "chat-agent-api",
+    createdAt: serverTimestamp(),
+  });
+
+  return true;
 }
 
 export default async function handler(req: any, res: any) {
@@ -225,6 +378,54 @@ export default async function handler(req: any, res: any) {
         ok: true,
         reply: picked.reply,
         media: buildMediaFromCatalog(picked.selected),
+      });
+      return;
+    }
+
+    const maybeName = extractName(message);
+    const maybePhone = extractPhone(message);
+    const maybeEmail = extractEmail(message);
+    const maybeDate = extractDate(message);
+    const maybeTime = extractTime(message);
+
+    if (hasMeetingIntent(message) && maybeName && maybeEmail && maybeDate && maybeTime) {
+      try {
+        await scheduleMeeting({
+          name: maybeName,
+          email: maybeEmail,
+          phone: maybePhone,
+          date: maybeDate,
+          time: maybeTime,
+          topic: "Consultoria Tecnica",
+        });
+      } catch {
+        // keep conversational response even if storage fails
+      }
+
+      res.status(200).json({
+        ok: true,
+        reply: `Perfeito, ${maybeName}. Reuniao agendada para ${maybeDate} as ${maybeTime}. Se quiser, ja me diga o ambiente e a metragem para adiantarmos a consultoria.`,
+        media: [],
+      });
+      return;
+    }
+
+    if ((hasLeadIntent(message) || maybePhone) && maybeName && maybePhone) {
+      try {
+        await saveLead({
+          name: maybeName,
+          phone: maybePhone,
+          environment: extractEnvironment(message),
+          area: extractArea(message),
+        });
+      } catch {
+        // keep conversational response even if storage fails
+      }
+
+      res.status(200).json({
+        ok: true,
+        reply: `Perfeito, ${maybeName}. Seus dados ja foram cadastrados. Agora me diga o ambiente e a metragem para eu indicar a melhor linha.`,
+        media: [],
       });
       return;
     }
@@ -259,23 +460,92 @@ export default async function handler(req: any, res: any) {
       config: {
         temperature: 0.2,
         maxOutputTokens: 280,
+        tools: [
+          {
+            functionDeclarations: [
+              {
+                name: "saveLead",
+                description: "Salvar lead quando nome e telefone forem confirmados",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    phone: { type: Type.STRING },
+                    environment: { type: Type.STRING },
+                    area: { type: Type.STRING },
+                  },
+                  required: ["name", "phone"],
+                },
+              },
+              {
+                name: "scheduleMeeting",
+                description: "Agendar reuniao quando nome, email, data e horario forem confirmados",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    email: { type: Type.STRING },
+                    phone: { type: Type.STRING },
+                    date: { type: Type.STRING },
+                    time: { type: Type.STRING },
+                    topic: { type: Type.STRING },
+                  },
+                  required: ["name", "email", "date", "time"],
+                },
+              },
+            ],
+          },
+        ],
       },
-      contents:
-        [
-          "Você é o Consultor Casaboni (vendas consultivas em ambientes).",
-          "Regras obrigatórias:",
-          "- Não invente produtos, preços, estoque, prazo ou políticas.",
-          "- Se faltar dado, faça apenas 1 pergunta objetiva por vez.",
-          "- Mantenha continuidade com o histórico e evite mudar de assunto.",
-          "- Respostas curtas (até 3 frases), em pt-BR, tom profissional e amigável.",
-          "- Antes de listar produtos, confirme categoria/ambiente/metragem.",
-          "",
-          "Catálogo disponível (somente referência real):",
-          ragCatalogCompact || "- Catálogo não carregado nesta requisição.",
-          "",
-          conversation,
-        ].join("\n"),
+      contents: [
+        "Voce e o Consultor Casaboni (vendas consultivas em ambientes).",
+        "Regras obrigatorias:",
+        "- Nao invente produtos, precos, estoque, prazos ou politicas.",
+        "- Se faltar dado, faca apenas 1 pergunta objetiva por vez.",
+        "- Mantenha continuidade com o historico e evite mudar de assunto.",
+        "- Respostas curtas (ate 3 frases), em pt-BR, tom profissional e amigavel.",
+        "- Antes de listar produtos, confirme categoria/ambiente/metragem.",
+        "- Produtos Casaboni: pisos, rodapes, telhas shingle e ripados.",
+        "",
+        "Catalogo disponivel:",
+        ragCatalogCompact || "- Catalogo nao carregado nesta requisicao.",
+        "",
+        conversation,
+      ].join("\n"),
     });
+
+    if (response.functionCalls?.length) {
+      for (const call of response.functionCalls) {
+        if (call.name === "saveLead") {
+          const args = (call.args || {}) as { name: string; phone: string; environment?: string; area?: string };
+          if (args.name && args.phone) {
+            try {
+              await saveLead(args);
+            } catch {
+              // ignore and continue
+            }
+          }
+        }
+
+        if (call.name === "scheduleMeeting") {
+          const args = (call.args || {}) as {
+            name: string;
+            email: string;
+            phone?: string;
+            date: string;
+            time: string;
+            topic?: string;
+          };
+          if (args.name && args.email && args.date && args.time) {
+            try {
+              await scheduleMeeting(args);
+            } catch {
+              // ignore and continue
+            }
+          }
+        }
+      }
+    }
 
     res.status(200).json({
       ok: true,
@@ -286,7 +556,8 @@ export default async function handler(req: any, res: any) {
     const message = String(req.body?.message || "").trim();
     const fallbackReply = message
       ? "Estou aqui para te ajudar com a escolha do produto ideal. Me diga ambiente, metragem e categoria."
-      : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
+      : "Posso te ajudar com pisos, rodapes, telhas e ripados. Como posso te atender?";
+
     res.status(200).json({
       ok: true,
       reply: fallbackReply,
@@ -294,4 +565,3 @@ export default async function handler(req: any, res: any) {
     });
   }
 }
-
