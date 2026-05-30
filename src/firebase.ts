@@ -134,7 +134,9 @@ export const loginWithGoogle = async () => {
 export function getFirebaseAuthErrorMessage(error: unknown) {
   const code = (error as any)?.code as string | undefined;
   if (code === "auth/unauthorized-domain") {
-    return "Domínio não autorizado no Firebase Auth. Adicione localhost em Authentication > Settings > Authorized domains.";
+    const currentHost =
+      typeof window !== "undefined" ? window.location.hostname : "seu-dominio";
+    return `Domínio não autorizado no Firebase Auth. Adicione ${currentHost} em Authentication > Settings > Authorized domains.`;
   }
   if (code === "auth/operation-not-allowed") {
     return "Login Google desabilitado no Firebase. Ative em Authentication > Sign-in method.";
