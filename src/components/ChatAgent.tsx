@@ -97,6 +97,11 @@ export default function ChatAgent() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isProcessing = useRef(false);
   const messagesRef = useRef<ChatMessageView[]>(messages);
+  const sessionIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -137,6 +142,7 @@ export default function ChatAgent() {
         body: JSON.stringify({
           message: userMessage,
           history: requestHistory,
+          sessionId: sessionIdRef.current,
         }),
       });
 

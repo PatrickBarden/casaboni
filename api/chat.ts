@@ -1,11 +1,30 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { initializeApp } from "firebase/app";
-import { addDoc, collection, getFirestore, serverTimestamp } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  getFirestore,
+  serverTimestamp,
+} from "firebase/firestore";
+import { getAdminDb } from "./_firebaseAdmin";
 
 type ChatMessage = { role: "user" | "bot"; text: string };
 type ProductCategory = "pisos" | "rodapes" | "telhas" | "ripados";
 type CatalogEntry = { label: string; url: string };
 type ChatMedia = { id: string; label: string; sourceUrl: string; thumbnailUrl: string };
+type LeadProfile = {
+  name?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  category?: ProductCategory | null;
+  environment?: string;
+  area?: string;
+  style?: string;
+  product?: string;
+  propertyType?: string;
+  sessionId?: string;
+};
 
 const firebaseConfig = {
   apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyDt0kyR-e6vTyMIPeCfxusPDedv6RnxcLs",
@@ -254,6 +273,154 @@ function extractTime(text: string) {
   return `${match[1].padStart(2, "0")}:${match[2]}`;
 }
 
+function extractProductModel(text: string) {
+  const n = normalizeText(text);
+  const models = [
+    { key: "veneza", label: "Veneza" },
+    { key: "verona", label: "Verona" },
+    { key: "florenca", label: "Floren\u00e7a" },
+    { key: "londres", label: "Londres" },
+    { key: "rio de janeiro", label: "Rio de Janeiro" },
+    { key: "washington", label: "Washington" },
+  ];
+  return models.find((model) => n.includes(model.key))?.label || "";
+}
+
+function extractCity(text: string) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const patterns = [
+    /\b(?:sou|falo|moro|estou)\s+(?:de|em)\s+([\p{L}\s.'-]{3,60})/iu,
+    /\bcidade\s*[:\-]?\s*([\p{L}\s.'-]{3,60})/iu,
+  ];
+
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (!match) continue;
+    const city = match[1]
+      .split(/\b(?:meu|minha|whatsapp|telefone|celular|email|nome|e\s+quero|quero|para|sobre)\b/i)[0]
+      .replace(/[,.!?]+$/g, "")
+      .trim();
+    if (city.length >= 3) return toNameCase(city);
+  }
+
+  return "";
+}
+
+function hasPositiveChoiceIntent(text: string) {
+  const n = normalizeText(text);
+  return /gostei|curti|amei|prefiro|quero esse|quero essa|esse mesmo|essa mesmo|ficou bom|me agradou/.test(n);
+}
+
+function hasQuoteIntent(text: string) {
+  const n = normalizeText(text);
+  return isPriceIntent(text) || /orcamento|orçamento|orc|proposta|comprar|fechar|pedido|quanto fica|me passa valor|quero simular/.test(n);
+}
+
+function isYesIntent(text: string) {
+  const n = normalizeText(text).trim();
+  return /^(sim|quero|claro|pode|pode sim|vamos|bora|ok|fechado|manda|me chama|quero sim)$/.test(n);
+}
+
+function contextText(history: ChatMessage[], message: string, role: "user" | "bot" = "user") {
+  return [
+    ...history
+      .filter((m) => m.role === role)
+      .slice(-12)
+      .map((m) => m.text),
+    role === "user" ? message : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildLeadProfile(history: ChatMessage[], message: string, sessionId?: string): LeadProfile {
+  const userTexts = [
+    ...history
+      .filter((m) => m.role === "user")
+      .slice(-12)
+      .map((m) => m.text),
+    message,
+  ];
+  const allUserText = userTexts.join(" ");
+  const latest = (extractor: (text: string) => string) =>
+    [...userTexts].reverse().map(extractor).find(Boolean) || "";
+  const environments = extractEnvironments(allUserText);
+
+  return {
+    name: latest(extractName),
+    phone: latest(extractPhone),
+    email: latest(extractEmail),
+    city: latest(extractCity),
+    category: detectCategory(allUserText),
+    environment: latest(extractEnvironment) || environments[0] || "",
+    area: latest(extractArea),
+    style: latest(extractStyle),
+    product: latest(extractProductModel),
+    propertyType: latest(extractPropertyType),
+    sessionId,
+  };
+}
+
+function compactProductLabel(profile: LeadProfile) {
+  return [profile.product, profile.category].filter(Boolean).join(" / ") || "";
+}
+
+function buildContactRequest(profile: LeadProfile) {
+  if (!profile.name && !profile.phone) {
+    return "Consigo deixar isso encaminhado para or\u00e7amento. Qual seu nome e WhatsApp para eu salvar seu atendimento e a equipe retornar certinho?";
+  }
+  if (!profile.name) {
+    return "Perfeito, recebi seu WhatsApp. Qual seu nome para eu deixar o atendimento identificado no CRM?";
+  }
+  if (!profile.phone) {
+    return `Perfeito, ${profile.name}. Qual WhatsApp posso salvar para a equipe te retornar com o pr\u00f3ximo passo?`;
+  }
+  if (!profile.city) {
+    return `Perfeito, ${profile.name}. J\u00e1 deixei seu atendimento salvo. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`;
+  }
+  return `Perfeito, ${profile.name}. J\u00e1 deixei seu atendimento salvo com a cidade ${profile.city}. Quer que eu siga refinando as op\u00e7\u00f5es por aqui ou prefere que a equipe te chame no WhatsApp?`;
+}
+
+function buildCommercialReply(message: string, history: ChatMessage[], profile: LeadProfile) {
+  const lastBotText = contextText(history, "", "bot");
+  const normalizedLastBot = normalizeText(lastBotText);
+  const botOfferedQuote =
+    normalizedLastBot.includes("orcamento") ||
+    /or.{0,3}amento/.test(normalizedLastBot) ||
+    normalizedLastBot.includes("salvar seu atendimento") ||
+    normalizedLastBot.includes("equipe retornar") ||
+    normalizedLastBot.includes("proximo passo");
+  const model = extractProductModel(message) || profile.product;
+  const enoughToQuote = Boolean(
+    (profile.product || profile.category) && (profile.environment || profile.propertyType) && (profile.area || profile.style)
+  );
+
+  if (profile.name && profile.phone && /whatsapp|telefone|celular|meu nome|nome|cidade|moro|sou de/i.test(message)) {
+    return buildContactRequest(profile);
+  }
+
+  if ((hasQuoteIntent(message) || (isYesIntent(message) && (botOfferedQuote || enoughToQuote))) && (!profile.name || !profile.phone || !profile.city)) {
+    return buildContactRequest(profile);
+  }
+
+  if (hasPositiveChoiceIntent(message) && model) {
+    if (!profile.environment) {
+      return `${model} \u00e9 uma boa escolha. Para eu te orientar melhor, ele seria para qual ambiente: sala, quarto, cozinha ou outro espa\u00e7o?`;
+    }
+    if (!profile.area) {
+      return `Boa escolha. Para ${profile.environment}, o ${model} pode funcionar muito bem. Qual a metragem aproximada para eu te orientar com mais seguran\u00e7a?`;
+    }
+    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe nome e WhatsApp.`;
+  }
+
+  if (enoughToQuote && !botOfferedQuote && !isPhotoIntent(message)) {
+    const item = compactProductLabel(profile);
+    return `Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 d\u00e1 para avan\u00e7ar. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe seu nome e WhatsApp.`;
+  }
+
+  return "";
+}
+
 function parseCatalogEntries(lines: string[]) {
   const entries: CatalogEntry[] = [];
   for (const line of lines) {
@@ -300,6 +467,7 @@ function hasCategoryMention(text: string) {
 }
 
 function isPhotoFollowUpSelection(history: ChatMessage[], message: string) {
+  if (hasPositiveChoiceIntent(message) || hasQuoteIntent(message)) return false;
   if (!hasCategoryMention(message) || history.length === 0) return false;
 
   const recentBotText = history
@@ -571,22 +739,79 @@ function sanitizeReply(text: string) {
   return clean.slice(0, 700);
 }
 
-async function saveLead(args: { name: string; phone: string; environment?: string; area?: string }) {
-  if (!db) return false;
-  await addDoc(collection(db, "leads"), {
-    name: args.name,
-    phone: args.phone,
+function cleanLeadPayload(args: LeadProfile & { source?: string; status?: string }) {
+  return {
+    name: args.name || "",
+    phone: args.phone || "",
+    email: args.email || "",
+    city: args.city || "",
+    product: args.product || "",
+    category: args.category || "",
     environment: args.environment || "",
     area: args.area || "",
+    style: args.style || "",
+    propertyType: args.propertyType || "",
+    sessionId: args.sessionId || "",
     date: new Date().toISOString().slice(0, 10),
-    status: "Novo",
-    source: "chat-agent-api",
+    status: args.status || "Novo",
+    source: args.source || "chat-agent-api",
+  };
+}
+
+async function saveLead(args: LeadProfile & { source?: string; status?: string }) {
+  const payload = cleanLeadPayload(args);
+  const adminDb = getAdminDb();
+
+  if (adminDb) {
+    if (payload.sessionId) {
+      const existing = await adminDb.collection("leads").where("sessionId", "==", payload.sessionId).limit(1).get();
+      if (!existing.empty) {
+        await existing.docs[0].ref.update({
+          ...payload,
+          updatedAt: new Date(),
+        });
+        return true;
+      }
+    }
+
+    await adminDb.collection("leads").add({
+      ...payload,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return true;
+  }
+
+  if (!db) return false;
+
+  // Public Firestore rules allow lead creation, but not public reads.
+  // Without Admin credentials, create directly instead of querying by session.
+  await addDoc(collection(db, "leads"), {
+    ...payload,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
   return true;
 }
 
 async function scheduleMeeting(args: { name: string; email: string; phone?: string; date: string; time: string; topic?: string }) {
+  const adminDb = getAdminDb();
+  if (adminDb) {
+    await adminDb.collection("meetings").add({
+      customerName: args.name,
+      customerEmail: args.email,
+      phone: args.phone || "",
+      date: args.date,
+      time: args.time,
+      topic: args.topic || "Consultoria T\u00e9cnica",
+      status: "Agendada",
+      source: "chat-agent-api",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return true;
+  }
+
   if (!db) return false;
   await addDoc(collection(db, "meetings"), {
     customerName: args.name,
@@ -612,6 +837,7 @@ export default async function handler(req: any, res: any) {
     const message = String(req.body?.message || "").trim();
     const history = Array.isArray(req.body?.history) ? (req.body.history as ChatMessage[]) : [];
     const customerContext = String(req.body?.customerContext || "").trim();
+    const sessionId = String(req.body?.sessionId || "").trim();
 
     if (!message) {
       res.status(400).json({ ok: false, error: "Mensagem vazia" });
@@ -638,6 +864,7 @@ export default async function handler(req: any, res: any) {
     const maybeEmail = extractEmail(message);
     const maybeDate = extractDate(message);
     const maybeTime = extractTime(message);
+    const leadProfile = buildLeadProfile(history, message, sessionId);
 
     if (hasMeetingIntent(message) && maybeName && maybeEmail && maybeDate && maybeTime) {
       try {
@@ -663,19 +890,40 @@ export default async function handler(req: any, res: any) {
 
     if ((hasLeadIntent(message) || maybePhone) && maybeName && maybePhone) {
       try {
-        await saveLead({ name: maybeName, phone: maybePhone, environment: extractEnvironment(message), area: extractArea(message) });
+        await saveLead({
+          ...leadProfile,
+          name: maybeName,
+          phone: maybePhone,
+          environment: leadProfile.environment || extractEnvironment(message),
+          area: leadProfile.area || extractArea(message),
+        });
       } catch {}
       res.status(200).json({
         ok: true,
-        reply: `Perfeito, ${maybeName}. Seus dados já foram cadastrados. Agora me diga o ambiente e a metragem para eu indicar a melhor linha.`,
+        reply: leadProfile.city
+          ? `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. Quer que eu encaminhe o pr\u00f3ximo passo de or\u00e7amento pelo WhatsApp?`
+          : `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`,
         media: [],
+        source: "lead-flow",
       });
       return;
     }
 
     if ((hasLeadIntent(message) || maybePhone) && (!maybeName || !maybePhone)) {
       const missingLead = !maybeName ? "nome completo" : "telefone/WhatsApp";
-      res.status(200).json({ ok: true, reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`, media: [] });
+      res.status(200).json({ ok: true, reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`, media: [], source: "lead-flow" });
+      return;
+    }
+
+    if (leadProfile.name && leadProfile.phone) {
+      try {
+        await saveLead(leadProfile);
+      } catch {}
+    }
+
+    const commercial = buildCommercialReply(message, history, leadProfile);
+    if (commercial) {
+      res.status(200).json({ ok: true, reply: commercial, media: [], source: "commercial-flow" });
       return;
     }
 

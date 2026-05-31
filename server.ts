@@ -6,7 +6,13 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import { initializeApp } from "firebase/app";
-import { addDoc, collection, getFirestore, serverTimestamp } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  getFirestore,
+  serverTimestamp,
+} from "firebase/firestore";
+import { getAdminDb } from "./api/_firebaseAdmin";
 
 dotenv.config({ path: ".env.local", override: true });
 dotenv.config();
@@ -30,6 +36,20 @@ type ChatMedia = {
   label: string;
   sourceUrl: string;
   thumbnailUrl: string;
+};
+
+type LeadProfile = {
+  name?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  category?: ProductCategory | null;
+  environment?: string;
+  area?: string;
+  style?: string;
+  product?: string;
+  propertyType?: string;
+  sessionId?: string;
 };
 
 function isPhotoIntent(text: string) {
@@ -138,6 +158,7 @@ function hasCategoryMention(text: string) {
 }
 
 function isPhotoFollowUpSelection(history: ChatMessage[], message: string) {
+  if (hasPositiveChoiceIntent(message) || hasQuoteIntent(message)) return false;
   const hasCategory = hasCategoryMention(message);
   if (!hasCategory || history.length === 0) return false;
 
@@ -383,22 +404,79 @@ function getFunctionDeclarations() {
   ];
 }
 
-async function saveLead(args: any) {
-  const dbRef = requireDb();
-  const ref = await addDoc(collection(dbRef, "leads"), {
-    name: args?.name || "",
-    phone: args?.phone || "",
-    environment: args?.environment || "",
-    area: args?.area || "",
+function cleanLeadPayload(args: LeadProfile & { source?: string; status?: string }) {
+  return {
+    name: args.name || "",
+    phone: args.phone || "",
+    email: args.email || "",
+    city: args.city || "",
+    product: args.product || "",
+    category: args.category || "",
+    environment: args.environment || "",
+    area: args.area || "",
+    style: args.style || "",
+    propertyType: args.propertyType || "",
+    sessionId: args.sessionId || "",
     date: new Date().toISOString().slice(0, 10),
-    status: "Novo",
-    source: "chat-agent-backend",
+    status: args.status || "Novo",
+    source: args.source || "chat-agent-backend",
+  };
+}
+
+async function saveLead(args: LeadProfile & { source?: string; status?: string }) {
+  const payload = cleanLeadPayload(args);
+  const adminDb = getAdminDb();
+
+  if (adminDb) {
+    if (payload.sessionId) {
+      const existing = await adminDb.collection("leads").where("sessionId", "==", payload.sessionId).limit(1).get();
+      if (!existing.empty) {
+        await existing.docs[0].ref.update({
+          ...payload,
+          updatedAt: new Date(),
+        });
+        return `Lead atualizado com sucesso (id: ${existing.docs[0].id}).`;
+      }
+    }
+
+    const ref = await adminDb.collection("leads").add({
+      ...payload,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return `Lead salvo com sucesso (id: ${ref.id}).`;
+  }
+
+  const dbRef = requireDb();
+
+  // Public Firestore rules allow lead creation, but not public reads.
+  // Without Admin credentials, create directly instead of querying by session.
+  const ref = await addDoc(collection(dbRef, "leads"), {
+    ...payload,
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
   return `Lead salvo com sucesso (id: ${ref.id}).`;
 }
 
 async function scheduleMeeting(args: any) {
+  const adminDb = getAdminDb();
+  if (adminDb) {
+    const ref = await adminDb.collection("meetings").add({
+      customerName: args?.name || "",
+      customerEmail: args?.email || "",
+      phone: args?.phone || "",
+      date: args?.date || "",
+      time: args?.time || "",
+      topic: args?.topic || "Consultoria Tecnica",
+      status: "Agendada",
+      source: "chat-agent-backend",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return `Reuniao agendada com sucesso (id: ${ref.id}).`;
+  }
+
   const dbRef = requireDb();
   const ref = await addDoc(collection(dbRef, "meetings"), {
     customerName: args?.name || "",
@@ -494,6 +572,155 @@ function extractTime(text: string) {
   if (!match) return "";
   return `${match[1].padStart(2, "0")}:${match[2]}`;
 }
+
+function extractProductModel(text: string) {
+  const n = normalizeText(text);
+  const models = [
+    { key: "veneza", label: "Veneza" },
+    { key: "verona", label: "Verona" },
+    { key: "florenca", label: "Floren\u00e7a" },
+    { key: "londres", label: "Londres" },
+    { key: "rio de janeiro", label: "Rio de Janeiro" },
+    { key: "washington", label: "Washington" },
+  ];
+  return models.find((model) => n.includes(model.key))?.label || "";
+}
+
+function extractCity(text: string) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const patterns = [
+    /\b(?:sou|falo|moro|estou)\s+(?:de|em)\s+([\p{L}\s.'-]{3,60})/iu,
+    /\bcidade\s*[:\-]?\s*([\p{L}\s.'-]{3,60})/iu,
+  ];
+
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (!match) continue;
+    const city = match[1]
+      .split(/\b(?:meu|minha|whatsapp|telefone|celular|email|nome|e\s+quero|quero|para|sobre)\b/i)[0]
+      .replace(/[,.!?]+$/g, "")
+      .trim();
+    if (city.length >= 3) return toNameCase(city);
+  }
+
+  return "";
+}
+
+function hasPositiveChoiceIntent(text: string) {
+  const n = normalizeText(text);
+  return /gostei|curti|amei|prefiro|quero esse|quero essa|esse mesmo|essa mesmo|ficou bom|me agradou/.test(n);
+}
+
+function hasQuoteIntent(text: string) {
+  const n = normalizeText(text);
+  return hasPriceIntent(text) || /orcamento|orçamento|orc|proposta|comprar|fechar|pedido|quanto fica|me passa valor|quero simular/.test(n);
+}
+
+function isYesIntent(text: string) {
+  const n = normalizeText(text).trim();
+  return /^(sim|quero|claro|pode|pode sim|vamos|bora|ok|fechado|manda|me chama|quero sim)$/.test(n);
+}
+
+function contextText(history: ChatMessage[], message: string, role: "user" | "bot" = "user") {
+  return [
+    ...history
+      .filter((m) => m.role === role)
+      .slice(-12)
+      .map((m) => m.text),
+    role === "user" ? message : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildLeadProfile(history: ChatMessage[], message: string, sessionId?: string): LeadProfile {
+  const userTexts = [
+    ...history
+      .filter((m) => m.role === "user")
+      .slice(-12)
+      .map((m) => m.text),
+    message,
+  ];
+  const allUserText = userTexts.join(" ");
+  const latest = (extractor: (text: string) => string) =>
+    [...userTexts].reverse().map(extractor).find(Boolean) || "";
+  const environments = extractEnvironments(allUserText);
+
+  return {
+    name: latest(extractName),
+    phone: latest(extractPhone),
+    email: latest(extractEmail),
+    city: latest(extractCity),
+    category: detectCategory(allUserText),
+    environment: latest(extractEnvironment) || environments[0] || "",
+    area: latest(extractArea),
+    style: latest(extractStyle),
+    product: latest(extractProductModel),
+    propertyType: latest(extractPropertyType),
+    sessionId,
+  };
+}
+
+function compactProductLabel(profile: LeadProfile) {
+  return [profile.product, profile.category].filter(Boolean).join(" / ") || "";
+}
+
+function buildContactRequest(profile: LeadProfile) {
+  if (!profile.name && !profile.phone) {
+    return "Consigo deixar isso encaminhado para or\u00e7amento. Qual seu nome e WhatsApp para eu salvar seu atendimento e a equipe retornar certinho?";
+  }
+  if (!profile.name) {
+    return "Perfeito, recebi seu WhatsApp. Qual seu nome para eu deixar o atendimento identificado no CRM?";
+  }
+  if (!profile.phone) {
+    return `Perfeito, ${profile.name}. Qual WhatsApp posso salvar para a equipe te retornar com o pr\u00f3ximo passo?`;
+  }
+  if (!profile.city) {
+    return `Perfeito, ${profile.name}. J\u00e1 deixei seu atendimento salvo. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`;
+  }
+  return `Perfeito, ${profile.name}. J\u00e1 deixei seu atendimento salvo com a cidade ${profile.city}. Quer que eu siga refinando as op\u00e7\u00f5es por aqui ou prefere que a equipe te chame no WhatsApp?`;
+}
+
+function buildCommercialReply(message: string, history: ChatMessage[], profile: LeadProfile) {
+  const lastBotText = contextText(history, "", "bot");
+  const normalizedLastBot = normalizeText(lastBotText);
+  const botOfferedQuote =
+    normalizedLastBot.includes("orcamento") ||
+    /or.{0,3}amento/.test(normalizedLastBot) ||
+    normalizedLastBot.includes("salvar seu atendimento") ||
+    normalizedLastBot.includes("equipe retornar") ||
+    normalizedLastBot.includes("proximo passo");
+  const model = extractProductModel(message) || profile.product;
+  const enoughToQuote = Boolean(
+    (profile.product || profile.category) && (profile.environment || profile.propertyType) && (profile.area || profile.style)
+  );
+
+  if (profile.name && profile.phone && /whatsapp|telefone|celular|meu nome|nome|cidade|moro|sou de/i.test(message)) {
+    return buildContactRequest(profile);
+  }
+
+  if ((hasQuoteIntent(message) || (isYesIntent(message) && (botOfferedQuote || enoughToQuote))) && (!profile.name || !profile.phone || !profile.city)) {
+    return buildContactRequest(profile);
+  }
+
+  if (hasPositiveChoiceIntent(message) && model) {
+    if (!profile.environment) {
+      return `${model} \u00e9 uma boa escolha. Para eu te orientar melhor, ele seria para qual ambiente: sala, quarto, cozinha ou outro espa\u00e7o?`;
+    }
+    if (!profile.area) {
+      return `Boa escolha. Para ${profile.environment}, o ${model} pode funcionar muito bem. Qual a metragem aproximada para eu te orientar com mais seguran\u00e7a?`;
+    }
+    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe nome e WhatsApp.`;
+  }
+
+  if (enoughToQuote && !botOfferedQuote && !isPhotoIntent(message)) {
+    const item = compactProductLabel(profile);
+    return `Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 d\u00e1 para avan\u00e7ar. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe seu nome e WhatsApp.`;
+  }
+
+  return "";
+}
+
 
 function extractEnvironment(text: string) {
   const n = normalizeText(text);
@@ -799,6 +1026,7 @@ export async function chatWithGemini(input: {
   message: string;
   history: ChatMessage[];
   customerContext?: string;
+  sessionId?: string;
 }) {
   const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
 
@@ -824,6 +1052,7 @@ export async function chatWithGemini(input: {
   const maybeEmail = extractEmail(input.message);
   const maybeDate = extractDate(input.message);
   const maybeTime = extractTime(input.message);
+  const leadProfile = buildLeadProfile(input.history, input.message, input.sessionId);
 
   if (hasMeetingIntent(input.message) && maybeName && maybeEmail && maybeDate && maybeTime) {
     try {
@@ -850,16 +1079,20 @@ export async function chatWithGemini(input: {
   if ((hasLeadIntent(input.message) || maybePhone) && maybeName && maybePhone) {
     try {
       await saveLead({
+        ...leadProfile,
         name: maybeName,
         phone: maybePhone,
-        environment: extractEnvironment(input.message),
-        area: "",
+        environment: leadProfile.environment || extractEnvironment(input.message),
+        area: leadProfile.area || extractArea(input.message),
       });
     } catch (error) {
       console.error("Deterministic saveLead fallback error:", error);
     }
     return {
-      reply: `Perfeito, ${maybeName}. Seus dados já foram cadastrados com sucesso. Para eu te indicar a melhor linha, qual ambiente você quer transformar?`,
+      reply: leadProfile.city
+        ? `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. Quer que eu encaminhe o pr\u00f3ximo passo de or\u00e7amento pelo WhatsApp?`
+        : `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`,
+      source: "lead-flow",
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -871,6 +1104,27 @@ export async function chatWithGemini(input: {
     const missingLead = !maybeName ? "nome completo" : "telefone/WhatsApp";
     return {
       reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`,
+      source: "lead-flow",
+      rag: {
+        filesFound: ragContext.filesFound,
+        driveCatalog: ragContext.driveCatalog,
+      },
+    };
+  }
+
+  if (leadProfile.name && leadProfile.phone) {
+    try {
+      await saveLead(leadProfile);
+    } catch (error) {
+      console.error("Commercial lead upsert error:", error);
+    }
+  }
+
+  const commercialReply = buildCommercialReply(input.message, input.history, leadProfile);
+  if (commercialReply) {
+    return {
+      reply: commercialReply,
+      source: "commercial-flow",
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -1079,13 +1333,14 @@ export function registerApiRoutes(app: express.Express) {
       const message = String(req.body?.message || "").trim();
       const history = Array.isArray(req.body?.history) ? (req.body.history as ChatMessage[]) : [];
       const customerContext = String(req.body?.customerContext || "").trim();
+      const sessionId = String(req.body?.sessionId || "").trim();
 
       if (!message) {
         res.status(400).json({ ok: false, error: "Mensagem vazia" });
         return;
       }
 
-      const result = await chatWithGemini({ message, history, customerContext });
+      const result = await chatWithGemini({ message, history, customerContext, sessionId });
       res.json({ ok: true, ...result });
     } catch (error) {
       console.error("POST /api/chat error:", error);
