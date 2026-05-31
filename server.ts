@@ -140,13 +140,27 @@ function hasCategoryMention(text: string) {
 function isPhotoFollowUpSelection(history: ChatMessage[], message: string) {
   const hasCategory = hasCategoryMention(message);
   if (!hasCategory || history.length === 0) return false;
-  const lastBot = [...history].reverse().find((h) => h.role === "bot")?.text || "";
-  const normalized = normalizeText(lastBot);
-  return (
-    normalized.includes("qual produto voce quer ver primeiro") ||
-    normalized.includes("tenho fotos de pisos") ||
-    normalized.includes("separo por categoria")
-  );
+
+  const recentBotText = history
+    .filter((h) => h.role === "bot")
+    .slice(-4)
+    .map((h) => h.text)
+    .join(" ");
+  const recentUserText = history
+    .filter((h) => h.role === "user")
+    .slice(-4)
+    .map((h) => h.text)
+    .join(" ");
+  const normalizedBot = normalizeText(recentBotText);
+
+  const botAskedForPhotoCategory =
+    normalizedBot.includes("qual produto voce quer ver primeiro") ||
+    normalizedBot.includes("tenho fotos de pisos") ||
+    normalizedBot.includes("separo por categoria");
+
+  // The frontend can submit the next message before React state includes the last bot reply.
+  // In that case, the previous user photo request is the safest signal to keep the photo flow.
+  return botAskedForPhotoCategory || isPhotoIntent(recentUserText);
 }
 
 function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
@@ -796,6 +810,7 @@ export async function chatWithGemini(input: {
     return {
       reply: photoReply.reply,
       media: photoReply.media,
+      source: "photo-flow",
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -867,6 +882,7 @@ export async function chatWithGemini(input: {
   if (guidedReply) {
     return {
       reply: guidedReply,
+      source: "guided-flow",
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -940,6 +956,7 @@ export async function chatWithGemini(input: {
 
     return {
       reply: response.text || "Pode repetir, por favor?",
+      source: "gemini",
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -1004,9 +1021,9 @@ export function registerApiRoutes(app: express.Express) {
     });
   });
 
-  app.get("/api/drive-image/:id", async (req, res) => {
+  app.get(["/api/drive-image", "/api/drive-image/:id"], async (req, res) => {
     try {
-      const id = String(req.params.id || "").trim();
+      const id = String(req.params.id || req.query.id || "").trim();
       const mode = req.query.mode === "thumb" ? "thumb" : "auto";
       if (!isValidDriveFileId(id)) {
         res.status(400).json({ ok: false, error: "Invalid file id" });

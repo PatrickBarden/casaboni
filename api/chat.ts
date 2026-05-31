@@ -280,6 +280,48 @@ function buildMediaFromCatalog(entries: CatalogEntry[]): ChatMedia[] {
     .filter((item): item is ChatMedia => Boolean(item));
 }
 
+function hasCategoryMention(text: string) {
+  const normalized = normalizeText(text);
+  return (
+    normalized.includes("piso") ||
+    normalized.includes("vinil") ||
+    normalized.includes("rodape") ||
+    normalized.includes("telha") ||
+    normalized.includes("shingle") ||
+    normalized.includes("ripado") ||
+    normalized.includes("wpc") ||
+    normalized.includes("veneza") ||
+    normalized.includes("verona") ||
+    normalized.includes("florenca") ||
+    normalized.includes("londres") ||
+    normalized.includes("rio de janeiro") ||
+    normalized.includes("washington")
+  );
+}
+
+function isPhotoFollowUpSelection(history: ChatMessage[], message: string) {
+  if (!hasCategoryMention(message) || history.length === 0) return false;
+
+  const recentBotText = history
+    .filter((h) => h.role === "bot")
+    .slice(-4)
+    .map((h) => h.text)
+    .join(" ");
+  const recentUserText = history
+    .filter((h) => h.role === "user")
+    .slice(-4)
+    .map((h) => h.text)
+    .join(" ");
+  const normalizedBot = normalizeText(recentBotText);
+
+  return (
+    normalizedBot.includes("qual produto voce quer ver primeiro") ||
+    normalizedBot.includes("tenho fotos de pisos") ||
+    normalizedBot.includes("separo por categoria") ||
+    isPhotoIntent(recentUserText)
+  );
+}
+
 function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
   const normalized = normalizeText(message);
   const models = ["veneza", "verona", "florenca", "londres", "rio de janeiro", "washington"];
@@ -578,10 +620,16 @@ export default async function handler(req: any, res: any) {
 
     const rag = await fetchRagContext(message, customerContext);
     const catalog = parseCatalogEntries(rag.driveCatalog);
+    const photoFlow = isPhotoIntent(message) || isPhotoFollowUpSelection(history, message);
 
-    if (isPhotoIntent(message)) {
+    if (photoFlow) {
       const picked = pickCatalogByIntent(message, catalog);
-      res.status(200).json({ ok: true, reply: picked.reply, media: buildMediaFromCatalog(picked.selected) });
+      res.status(200).json({
+        ok: true,
+        reply: picked.reply,
+        media: buildMediaFromCatalog(picked.selected),
+        source: "photo-flow",
+      });
       return;
     }
 
@@ -633,7 +681,7 @@ export default async function handler(req: any, res: any) {
 
     const guided = buildGuidedReply(message, history);
     if (guided) {
-      res.status(200).json({ ok: true, reply: guided, media: [] });
+      res.status(200).json({ ok: true, reply: guided, media: [], source: "guided-flow" });
       return;
     }
 
@@ -743,7 +791,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    res.status(200).json({ ok: true, reply: sanitizeReply(response.text), media: [] });
+    res.status(200).json({ ok: true, reply: sanitizeReply(response.text), media: [], source: "gemini" });
   } catch {
     const message = String(req.body?.message || "").trim();
     const exploratoryFallback = hasExplorationIntent(message);
@@ -753,6 +801,6 @@ export default async function handler(req: any, res: any) {
         : "Estou aqui para te atender e te ajudar a escolher o produto ideal. Qual ambiente você quer renovar primeiro?"
       : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
 
-    res.status(200).json({ ok: true, reply: fallbackReply, media: [] });
+    res.status(200).json({ ok: true, reply: fallbackReply, media: [], source: "fallback-error" });
   }
 }

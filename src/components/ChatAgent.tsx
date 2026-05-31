@@ -96,6 +96,7 @@ export default function ChatAgent() {
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isProcessing = useRef(false);
+  const messagesRef = useRef<ChatMessageView[]>(messages);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -103,6 +104,10 @@ export default function ChatAgent() {
     }, 3000);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -117,7 +122,10 @@ export default function ChatAgent() {
     if (!input.trim() || isProcessing.current) return;
 
     const userMessage = input;
-    setMessages((prev) => [...prev, { role: "user", text: userMessage }]);
+    const requestHistory = messagesRef.current;
+    const nextMessages: ChatMessageView[] = [...requestHistory, { role: "user", text: userMessage }];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
     setInput("");
     setIsTyping(true);
     isProcessing.current = true;
@@ -128,7 +136,7 @@ export default function ChatAgent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage,
-          history: messages,
+          history: requestHistory,
         }),
       });
 
@@ -137,6 +145,9 @@ export default function ChatAgent() {
       }
 
       const data = await response.json();
+      if (data?.source) {
+        console.info("[Casaboni chat]", data.source);
+      }
       const reply = data?.reply || "Pode repetir, por favor?";
       const media = Array.isArray(data?.media)
         ? data.media.map((m: any) => ({
@@ -148,10 +159,21 @@ export default function ChatAgent() {
             .filter((m: DriveImagePreview) => m.id && m.thumbnailUrl)
         : [];
       const safeReply = media.length > 0 ? stripDriveLinks(reply) : reply;
-      setMessages((prev) => [...prev, { role: "bot", text: safeReply, media }]);
+      setMessages((prev) => {
+        const updated = [...prev, { role: "bot" as const, text: safeReply, media }];
+        messagesRef.current = updated;
+        return updated;
+      });
     } catch (error) {
       console.error("Chat error:", error);
-      setMessages((prev) => [...prev, { role: "bot", text: "Tive um pequeno problema técnico. Pode me chamar no WhatsApp se preferir!" }]);
+      setMessages((prev) => {
+        const updated = [
+          ...prev,
+          { role: "bot" as const, text: "Tive um pequeno problema técnico. Pode me chamar no WhatsApp se preferir!" },
+        ];
+        messagesRef.current = updated;
+        return updated;
+      });
     } finally {
       setIsTyping(false);
       isProcessing.current = false;
