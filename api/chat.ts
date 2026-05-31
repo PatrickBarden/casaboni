@@ -73,6 +73,11 @@ function hasLeadIntent(text: string) {
   return /salvar|cadastro|cadastrar|contato|whatsapp/.test(normalizeText(text));
 }
 
+function hasFrustrationIntent(text: string) {
+  const n = normalizeText(text);
+  return /nao entende|nao entendeu|nao entende nada|errado|nada a ver|burro|burra|repetindo|voce nao entende|vc nao entende/.test(n);
+}
+
 function hasExplorationIntent(text: string) {
   const n = normalizeText(text);
   const raw = text.toLowerCase();
@@ -87,7 +92,7 @@ function hasUnknownAreaIntent(text: string) {
   const n = normalizeText(text);
   const raw = text.toLowerCase();
   const mentionsAreaContext =
-    /metragem|medida|area|m2|m²|metro/.test(n) || /\b\d+\s*m(?:2|²)?\b/i.test(raw);
+    /metragem|medida|area|m2|m\u00b2|metro/.test(n) || /\b\d+\s*m(?:2|\u00b2)?\b/i.test(raw);
   return (
     /sem metragem|sem medida/.test(n) ||
     (/nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia/.test(n) &&
@@ -135,11 +140,24 @@ function extractEnvironment(text: string) {
   if (n.includes("sala")) return "Sala";
   if (n.includes("quarto")) return "Quarto";
   if (n.includes("cozinha")) return "Cozinha";
-  if (n.includes("escritorio")) return "Escritório";
+  if (n.includes("escritorio")) return "Escrit\u00f3rio";
   if (n.includes("banheiro")) return "Banheiro";
-  if (n.includes("area gourmet")) return "Área Gourmet";
+  if (n.includes("area gourmet")) return "\u00c1rea Gourmet";
   if (n.includes("comercial")) return "Comercial";
   return "";
+}
+
+function extractEnvironments(text: string) {
+  const n = normalizeText(text);
+  const envs: string[] = [];
+  if (n.includes("sala")) envs.push("Sala");
+  if (n.includes("quarto")) envs.push("Quarto");
+  if (n.includes("cozinha")) envs.push("Cozinha");
+  if (n.includes("escritorio")) envs.push("Escrit\u00f3rio");
+  if (n.includes("banheiro")) envs.push("Banheiro");
+  if (n.includes("area gourmet")) envs.push("\u00c1rea Gourmet");
+  if (n.includes("comercial")) envs.push("Comercial");
+  return envs;
 }
 
 function extractPropertyType(text: string) {
@@ -152,11 +170,11 @@ function extractPropertyType(text: string) {
 function extractArea(text: string) {
   const normalized = normalizeText(text).trim();
   const directNumber = normalized.match(/^(\d{1,4})([.,]\d{1,2})?$/);
-  if (directNumber) return `${directNumber[1]}m²`;
+  if (directNumber) return `${directNumber[1]}m\u00b2`;
 
-  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|m²|m|metros?|metro)\b/i);
+  const match = normalized.match(/\b(\d{1,4})([.,]\d{1,2})?\s*(m2|m\u00b2|m|metros?|metro)\b/i);
   if (!match) return "";
-  return `${match[1]}m²`;
+  return `${match[1]}m\u00b2`;
 }
 
 function extractPhone(text: string) {
@@ -370,25 +388,29 @@ async function fetchRagContext(message: string, customerContext?: string) {
 }
 
 function contextFromHistory(history: ChatMessage[]) {
-  const lastUserText = history
+  const userTexts = history
     .filter((m) => m.role === "user")
-    .slice(-6)
-    .map((m) => m.text)
-    .join(" ");
+    .slice(-8)
+    .map((m) => m.text);
+  const lastUserText = userTexts.join(" ");
   const lastBotText = history
     .filter((m) => m.role === "bot")
     .slice(-3)
     .map((m) => m.text)
     .join(" ");
+  const latestFromUserHistory = (extractor: (text: string) => string) =>
+    [...userTexts].reverse().map(extractor).find(Boolean) || "";
+  const environments = extractEnvironments(lastUserText);
 
   return {
     category: detectCategory(lastUserText),
-    environment: extractEnvironment(lastUserText),
-    propertyType: extractPropertyType(lastUserText),
-    area: extractArea(lastUserText),
-    areaBand: extractAreaBand(lastUserText),
-    style: extractStyle(lastUserText),
-    botAskedArea: /metragem|m²|m2/.test(normalizeText(lastBotText)),
+    environment: latestFromUserHistory(extractEnvironment) || environments[0] || "",
+    environments,
+    propertyType: latestFromUserHistory(extractPropertyType) || extractPropertyType(lastUserText),
+    area: latestFromUserHistory(extractArea) || extractArea(lastUserText),
+    areaBand: latestFromUserHistory(extractAreaBand) || extractAreaBand(lastUserText),
+    style: latestFromUserHistory(extractStyle) || extractStyle(lastUserText),
+    botAskedArea: /metragem|m\u00b2|m2/.test(normalizeText(lastBotText)),
     botEnvironment: extractEnvironment(lastBotText),
     greeted: history.some(
       (m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")
@@ -404,6 +426,8 @@ function buildGuidedReply(message: string, history: ChatMessage[]) {
   const area = extractArea(message) || historyCtx.area;
   const areaBand = extractAreaBand(message) || historyCtx.areaBand;
   const style = extractStyle(message) || historyCtx.style;
+  const currentEnvironments = extractEnvironments(message);
+  const environments = currentEnvironments.length ? currentEnvironments : historyCtx.environments;
   const areaNumber = parseAreaNumber(area);
   const likelyAreaTypingMistake =
     !!area &&
@@ -419,6 +443,17 @@ function buildGuidedReply(message: string, history: ChatMessage[]) {
       return "Perfeito. Me diga o próximo detalhe que você quer analisar e eu te ajudo a decidir.";
     }
     return "Olá! Sou o Consultor Casaboni. Estou aqui para te atender e te ajudar a escolher a melhor solução para seu ambiente. Qual espaço você quer transformar hoje?";
+  }
+
+  if (hasFrustrationIntent(message)) {
+    const known = [category, environment, area, style].filter(Boolean).join(", ");
+    return known
+      ? `Voc\u00ea tem raz\u00e3o, eu me perdi no contexto. J\u00e1 tenho aqui: ${known}. Vamos seguir de forma simples: quer que eu te mostre um recorte visual do portf\u00f3lio ou prefere que eu indique 2 op\u00e7\u00f5es mais seguras?`
+      : "Voc\u00ea tem raz\u00e3o, eu me perdi. Vamos recome\u00e7ar de forma simples: \u00e9 para casa ou apartamento, e qual ambiente voc\u00ea quer transformar primeiro?";
+  }
+
+  if (currentEnvironments.length > 1 && category && !extractArea(message)) {
+    return `Perfeito, vamos organizar por partes para n\u00e3o misturar a indica\u00e7\u00e3o. Come\u00e7amos por ${currentEnvironments[0]} ou ${currentEnvironments[1]}? Depois eu te ajudo a manter harmonia entre os ambientes.`;
   }
 
   if (isPriceIntent(message) && !category) {
