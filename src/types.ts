@@ -4,14 +4,41 @@ export interface Lead {
   phone: string;
   email?: string;
   city: string;
+  uf?: string;
   product: string;
   environment: string;
   area: string;
   date: string;
   status: string;
   source?: string;
+  sourceLabel?: string;
+  leadOrigin?: "site" | "imported";
   notes?: string;
+  rank?: string | number;
+  classification?: string;
+  score?: string | number;
+  segment?: string;
+  recommendedProduct?: string;
+  filterReason?: string;
+  cnpj?: string;
+  companyName?: string;
+  tradeName?: string;
+  cnaeMain?: string;
+  cnaeDescription?: string;
+  cnaeSecondary?: string;
+  companySize?: string;
+  openedAt?: string;
+  shareCapital?: string | number;
+  ddd?: string;
+  phone2?: string;
+  mobile?: string;
+  whatsappSuggested?: string;
+  ownerName?: string;
+  role?: string;
+  address?: string;
+  importBatch?: string;
   createdAt?: any;
+  importedAt?: any;
 }
 
 export interface Product {

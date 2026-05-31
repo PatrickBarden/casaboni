@@ -1,14 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
+  BadgeCheck,
+  Building2,
   Calendar,
   Download,
   Edit,
   LayoutDashboard,
   LogIn,
   LogOut,
+  Mail,
+  MapPin,
   Package,
+  Phone,
   Search,
+  Sparkles,
+  Target,
   Trash2,
   Upload,
   User,
@@ -41,6 +48,10 @@ import BrandLogo from "../components/BrandLogo";
 
 type LeadImportRow = Omit<Lead, "id">;
 
+const IMPORT_SOURCE = "imported-list";
+const SITE_SOURCE_LABEL = "Site";
+const IMPORT_SOURCE_LABEL = "Importado";
+
 function normalizeHeader(value: string) {
   return value
     .toLowerCase()
@@ -63,49 +74,165 @@ function pick(row: Record<string, any>, aliases: string[]) {
   return "";
 }
 
+function cleanPhone(value: string) {
+  return String(value || "").replace(/\D/g, "");
+}
+
 function normalizeDate(value: string) {
   if (!value) return new Date().toISOString().slice(0, 10);
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    const [day, month, year] = value.split("/");
+    return `${year}-${month}-${day}`;
+  }
   const parsed = new Date(value);
   if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   return value;
 }
 
-function mapRows(rows: Record<string, any>[]): LeadImportRow[] {
-  return rows
-    .map((row) => ({
-      name: pick(row, ["nome", "name", "cliente", "contato"]),
-      phone: pick(row, ["telefone", "phone", "whatsapp", "celular", "fone"]),
-      email: pick(row, ["email", "e-mail"]),
-      city: pick(row, ["cidade", "city"]),
-      product: pick(row, ["produto", "product", "interesse", "categoria"]),
-      environment: pick(row, ["ambiente", "environment", "comodo", "cômodo"]),
-      area: pick(row, ["area", "área", "metragem", "m2", "m²"]),
-      date: normalizeDate(pick(row, ["data", "date", "criado em", "createdAt"])),
-      status: pick(row, ["status", "etapa"]) || "Novo",
-      source: "import-admin-excel",
-      notes: pick(row, ["observacoes", "observações", "notes", "comentarios", "comentários"]),
-      createdAt: serverTimestamp(),
-    }))
-    .filter((lead) => lead.name || lead.phone || lead.email);
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(field);
+      field = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(field);
+      if (row.some((cell) => cell.trim())) rows.push(row);
+      row = [];
+      field = "";
+      continue;
+    }
+
+    field += char;
+  }
+
+  row.push(field);
+  if (row.some((cell) => cell.trim())) rows.push(row);
+  return rowsToObjects(rows);
 }
 
 function rowsToObjects(rows: any[][]) {
   const [headers = [], ...dataRows] = rows;
   return dataRows.map((row) =>
     headers.reduce<Record<string, any>>((acc, header, index) => {
-      acc[String(header || `coluna_${index + 1}`)] = row[index] ?? "";
+      acc[String(header || `coluna_${index + 1}`).replace(/^\uFEFF/, "")] = row[index] ?? "";
       return acc;
     }, {})
   );
 }
 
-function parseCsv(text: string) {
-  const rows = text
-    .split(/\r?\n/)
-    .filter((line) => line.trim())
-    .map((line) => line.split(";").length > line.split(",").length ? line.split(";") : line.split(","));
+function mapRows(rows: Record<string, any>[]): LeadImportRow[] {
+  const importBatch = `import-${new Date().toISOString().slice(0, 10)}`;
 
-  return rowsToObjects(rows);
+  return rows
+    .map((row) => {
+      const cnpj = cleanPhone(pick(row, ["cnpj"]));
+      const companyName = pick(row, ["empresa", "razao social", "razão social"]);
+      const tradeName = pick(row, ["nome fantasia", "fantasia"]);
+      const ownerName = pick(row, ["proprietario/socio", "proprietário/sócio", "socio", "sócio", "contato"]);
+      const whatsappSuggested = cleanPhone(pick(row, ["whatsapp sugerido", "whatsapp"]));
+      const mobile = cleanPhone(pick(row, ["celular"]));
+      const ddd = cleanPhone(pick(row, ["ddd"]));
+      const phone = whatsappSuggested || mobile || `${ddd}${cleanPhone(pick(row, ["telefone", "phone"]))}`;
+      const recommendedProduct = pick(row, ["produto/abordagem indicada", "produto", "interesse"]);
+      const filterReason = pick(row, ["motivo do filtro a+++", "motivo", "observacoes", "observações"]);
+
+      return {
+        name: tradeName || companyName || ownerName,
+        phone,
+        email: pick(row, ["email", "e-mail"]),
+        city: pick(row, ["cidade", "city"]),
+        uf: pick(row, ["uf", "estado"]),
+        product: recommendedProduct,
+        recommendedProduct,
+        environment: pick(row, ["segmento estrategico", "segmento estratégico", "ambiente"]),
+        area: "",
+        date: new Date().toISOString().slice(0, 10),
+        status: "Novo",
+        source: IMPORT_SOURCE,
+        sourceLabel: IMPORT_SOURCE_LABEL,
+        leadOrigin: "imported" as const,
+        notes: filterReason,
+        rank: pick(row, ["rank"]),
+        classification: pick(row, ["classificacao", "classificação"]),
+        score: pick(row, ["score a+++", "score"]),
+        segment: pick(row, ["segmento estrategico", "segmento estratégico"]),
+        filterReason,
+        cnpj,
+        companyName,
+        tradeName,
+        cnaeMain: pick(row, ["cnae principal"]),
+        cnaeDescription: pick(row, ["cnae descricao", "cnae descrição"]),
+        cnaeSecondary: pick(row, ["cnae secundario", "cnae secundário"]),
+        companySize: pick(row, ["porte"]),
+        openedAt: normalizeDate(pick(row, ["abertura"])),
+        shareCapital: pick(row, ["capital social"]),
+        ddd,
+        phone2: cleanPhone(pick(row, ["telefone 2"])),
+        mobile,
+        whatsappSuggested,
+        ownerName,
+        role: pick(row, ["cargo"]),
+        address: pick(row, ["endereco", "endereço"]),
+        importBatch,
+        importedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      };
+    })
+    .filter((lead) => lead.name || lead.phone || lead.email || lead.cnpj);
+}
+
+function getLeadOrigin(lead: Lead) {
+  if (lead.leadOrigin === "imported" || lead.source === IMPORT_SOURCE || lead.source?.includes("import")) {
+    return "imported";
+  }
+  return "site";
+}
+
+function getOriginLabel(lead: Lead) {
+  return getLeadOrigin(lead) === "imported" ? IMPORT_SOURCE_LABEL : SITE_SOURCE_LABEL;
+}
+
+function formatLeadDate(lead: Lead) {
+  if (lead.date) return lead.date;
+  const seconds = lead.createdAt?.seconds;
+  if (seconds) return new Date(seconds * 1000).toISOString().slice(0, 10);
+  return "-";
+}
+
+function statusClass(status?: string) {
+  const normalized = String(status || "Novo").toLowerCase();
+  if (normalized.includes("fechado") || normalized.includes("ganho")) return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (normalized.includes("atendimento") || normalized.includes("contato")) return "bg-amber-50 text-amber-700 border-amber-200";
+  if (normalized.includes("perdido")) return "bg-red-50 text-red-700 border-red-200";
+  return "bg-blue-50 text-blue-700 border-blue-200";
+}
+
+function originClass(lead: Lead) {
+  return getLeadOrigin(lead) === "imported"
+    ? "bg-zinc-950 text-white border-zinc-950"
+    : "bg-action/10 text-action border-action/30";
 }
 
 export default function AdminLeads() {
@@ -124,11 +251,27 @@ export default function AdminLeads() {
     const term = search.trim().toLowerCase();
     if (!term) return leads;
     return leads.filter((lead) =>
-      [lead.name, lead.phone, lead.email, lead.city, lead.product, lead.environment, lead.status]
+      [
+        lead.name,
+        lead.phone,
+        lead.email,
+        lead.city,
+        lead.uf,
+        lead.product,
+        lead.companyName,
+        lead.tradeName,
+        lead.ownerName,
+        lead.cnpj,
+        lead.segment,
+        lead.status,
+      ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(term))
     );
   }, [leads, search]);
+
+  const importedCount = useMemo(() => leads.filter((lead) => getLeadOrigin(lead) === "imported").length, [leads]);
+  const siteCount = leads.length - importedCount;
 
   useEffect(() => {
     let cancelled = false;
@@ -153,7 +296,7 @@ export default function AdminLeads() {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(collection(db, "leads"), orderBy("createdAt", "desc"), limit(300));
+    const q = query(collection(db, "leads"), orderBy("createdAt", "desc"), limit(6000));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
@@ -204,8 +347,9 @@ export default function AdminLeads() {
       for (const chunk of chunks) {
         const batch = writeBatch(db);
         chunk.forEach((lead) => {
-          const ref = doc(collection(db, "leads"));
-          batch.set(ref, lead);
+          const docId = lead.cnpj ? `imported_${lead.cnpj}` : undefined;
+          const ref = docId ? doc(db, "leads", docId) : doc(collection(db, "leads"));
+          batch.set(ref, lead, { merge: true });
         });
         await batch.commit();
       }
@@ -263,7 +407,7 @@ export default function AdminLeads() {
   }
 
   return (
-    <div className="min-h-screen bg-surface-low flex">
+    <div className="min-h-screen bg-[#f4f1ec] flex">
       <aside className="w-64 bg-primary text-white flex flex-col fixed h-full">
         <div className="p-8 border-b border-white/10">
           <BrandLogo subtitle="Admin Panel" light compact />
@@ -298,19 +442,22 @@ export default function AdminLeads() {
       </aside>
 
       <main className="flex-1 ml-64 p-10">
-        <header className="flex justify-between items-center mb-10">
+        <header className="flex flex-col gap-6 mb-8 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-primary uppercase tracking-tighter">Leads</h1>
-            <p className="text-sm text-outline mt-2">Importe contatos, acompanhe status e organize oportunidades.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.35em] text-action mb-3">CRM Casaboni</p>
+            <h1 className="text-4xl font-bold text-primary uppercase tracking-tighter">Leads</h1>
+            <p className="text-sm text-outline mt-2 max-w-2xl">
+              Base comercial com origem identificada, score de oportunidade e contatos importados para prospecção.
+            </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-outline" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-outline" />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Pesquisar leads..."
-                className="pl-10 pr-4 py-2 bg-white border border-outline-variant rounded-full text-sm focus:outline-none focus:border-action w-72"
+                placeholder="Pesquisar empresa, cidade, telefone..."
+                className="pl-11 pr-4 py-3 bg-white border border-outline-variant rounded-2xl text-sm focus:outline-none focus:border-action w-full sm:w-96 shadow-sm"
               />
             </div>
             <input
@@ -325,51 +472,72 @@ export default function AdminLeads() {
             />
             <button
               onClick={() => inputRef.current?.click()}
-              className="flex items-center gap-2 bg-primary text-white px-5 py-2 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-primary/90 transition-colors"
+              className="flex items-center justify-center gap-2 bg-primary text-white px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-primary/90 transition-colors shadow-sm"
             >
-              <Upload className="w-4 h-4" /> Importar Excel
+              <Upload className="w-4 h-4" /> Importar base
             </button>
           </div>
         </header>
 
+        <section className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-4">
+          <div className="bg-primary text-white p-5 rounded-3xl shadow-ambient">
+            <p className="text-[10px] uppercase tracking-[0.25em] text-white/60">Total</p>
+            <strong className="block text-3xl mt-2">{leads.length}</strong>
+          </div>
+          <div className="bg-white border border-outline-variant p-5 rounded-3xl shadow-sm">
+            <p className="text-[10px] uppercase tracking-[0.25em] text-outline">Do site</p>
+            <strong className="block text-3xl text-action mt-2">{siteCount}</strong>
+          </div>
+          <div className="bg-white border border-outline-variant p-5 rounded-3xl shadow-sm">
+            <p className="text-[10px] uppercase tracking-[0.25em] text-outline">Importados</p>
+            <strong className="block text-3xl text-primary mt-2">{importedCount}</strong>
+          </div>
+          <div className="bg-white border border-outline-variant p-5 rounded-3xl shadow-sm">
+            <p className="text-[10px] uppercase tracking-[0.25em] text-outline">Exibindo</p>
+            <strong className="block text-3xl text-primary mt-2">{filteredLeads.length}</strong>
+          </div>
+        </section>
+
         {dbError && (
-          <div className="mb-6 bg-amber-50 border border-amber-200 text-amber-800 px-6 py-4 text-sm uppercase tracking-wider font-bold">
+          <div className="mb-6 bg-amber-50 border border-amber-200 text-amber-800 px-6 py-4 text-sm uppercase tracking-wider font-bold rounded-2xl">
             {dbError}
           </div>
         )}
 
         {previewRows.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-8 bg-white border border-outline-variant shadow-ambient">
-            <div className="p-5 border-b border-outline-variant flex items-center justify-between">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-8 bg-white border border-outline-variant shadow-ambient rounded-3xl overflow-hidden">
+            <div className="p-6 border-b border-outline-variant flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-widest text-primary">Prévia da importação</h2>
-                <p className="text-xs text-outline mt-1">{previewRows.length} contatos prontos para importar.</p>
+                <p className="text-xs text-outline mt-1">{previewRows.length} contatos prontos para importar com badge Importado.</p>
               </div>
               <button
                 onClick={importPreview}
                 disabled={importing}
-                className="flex items-center gap-2 bg-action text-white px-5 py-2 rounded-full text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+                className="flex items-center justify-center gap-2 bg-action text-white px-5 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest disabled:opacity-50"
               >
-                <Download className="w-4 h-4" /> {importing ? "Importando..." : "Confirmar"}
+                <Download className="w-4 h-4" /> {importing ? "Importando..." : "Confirmar importação"}
               </button>
             </div>
             <div className="overflow-x-auto max-h-72">
               <table className="w-full text-left">
                 <thead className="bg-surface-low sticky top-0">
                   <tr>
-                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Nome</th>
-                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">WhatsApp</th>
-                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Produto</th>
+                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Empresa</th>
+                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Contato</th>
+                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Score</th>
+                    <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Produto indicado</th>
                     <th className="p-3 text-[10px] font-bold uppercase tracking-widest text-outline">Cidade</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
                   {previewRows.slice(0, 20).map((lead, index) => (
-                    <tr key={`${lead.phone}-${index}`}>
-                      <td className="p-3 text-sm font-bold text-primary">{lead.name || "-"}</td>
-                      <td className="p-3 text-xs text-outline">{lead.phone || "-"}</td>
-                      <td className="p-3 text-xs text-outline">{lead.product || "-"}</td>
-                      <td className="p-3 text-xs text-outline">{lead.city || "-"}</td>
+                    <tr key={`${lead.cnpj || lead.phone}-${index}`}>
+                      <td className="p-3 text-sm font-bold text-primary">{lead.tradeName || lead.companyName || lead.name || "-"}</td>
+                      <td className="p-3 text-xs text-outline">{lead.phone || lead.email || "-"}</td>
+                      <td className="p-3 text-xs text-outline">{lead.classification || "-"} {lead.score ? `• ${lead.score}` : ""}</td>
+                      <td className="p-3 text-xs text-outline max-w-md truncate">{lead.recommendedProduct || lead.product || "-"}</td>
+                      <td className="p-3 text-xs text-outline">{lead.city || "-"}/{lead.uf || ""}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -378,67 +546,117 @@ export default function AdminLeads() {
           </motion.div>
         )}
 
-        <div className="bg-white shadow-ambient border border-outline-variant overflow-hidden">
-          <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-lowest">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-primary">Base de Leads</h2>
+        <section className="bg-white border border-outline-variant rounded-[2rem] shadow-ambient overflow-hidden">
+          <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-white">
+            <div>
+              <h2 className="text-xs font-bold uppercase tracking-widest text-primary">Base de Leads</h2>
+              <p className="text-xs text-outline mt-1">Cards comerciais com origem, score e próximo status.</p>
+            </div>
             <span className="text-xs font-bold uppercase tracking-widest text-outline">Total: {filteredLeads.length}</span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-surface-low border-b border-outline-variant">
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Cliente</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Interesse</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Ambiente</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Data</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Status</th>
-                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-outline">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant">
-                {loading ? (
-                  <tr>
-                    <td colSpan={6} className="p-10 text-center text-outline">Carregando...</td>
-                  </tr>
-                ) : filteredLeads.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-10 text-center text-outline">Nenhum lead encontrado.</td>
-                  </tr>
-                ) : (
-                  filteredLeads.map((lead) => (
-                    <tr key={lead.id} className="hover:bg-surface transition-colors">
-                      <td className="p-4">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-bold text-primary">{lead.name || "Sem nome"}</span>
-                          <span className="text-[10px] text-outline uppercase">{lead.phone || lead.email || "-"}</span>
+          <div className="p-6">
+            {loading ? (
+              <div className="p-10 text-center text-outline">Carregando...</div>
+            ) : filteredLeads.length === 0 ? (
+              <div className="p-10 text-center text-outline">Nenhum lead encontrado.</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                {filteredLeads.map((lead) => (
+                  <motion.article
+                    key={lead.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="group relative overflow-hidden rounded-3xl border border-outline-variant bg-[#fbfaf7] p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-ambient"
+                  >
+                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-action via-primary to-zinc-300" />
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest ${originClass(lead)}`}>
+                            <BadgeCheck className="h-3 w-3" /> {getOriginLabel(lead)}
+                          </span>
+                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest ${statusClass(lead.status)}`}>
+                            {lead.status || "Novo"}
+                          </span>
+                          {lead.classification && (
+                            <span className="rounded-full border border-action/25 bg-action/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-action">
+                              {lead.classification}{lead.score ? ` • ${lead.score}` : ""}
+                            </span>
+                          )}
                         </div>
-                      </td>
-                      <td className="p-4 text-xs font-medium text-primary uppercase">{lead.product || "-"}</td>
-                      <td className="p-4 text-xs font-medium text-primary uppercase">{lead.environment || lead.area || "-"}</td>
-                      <td className="p-4 text-xs text-outline">{lead.date || "-"}</td>
-                      <td className="p-4">
-                        <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase tracking-widest">
-                          {lead.status || "Novo"}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => void editLead(lead)} className="p-1 hover:bg-surface-high rounded transition-colors">
-                            <Edit className="w-4 h-4 text-outline" />
-                          </button>
-                          <button onClick={() => void deleteLead(lead)} className="p-1 hover:bg-red-50 rounded transition-colors">
-                            <Trash2 className="w-4 h-4 text-outline hover:text-red-600" />
-                          </button>
+                        <h3 className="truncate text-lg font-black uppercase tracking-tight text-primary">
+                          {lead.tradeName || lead.companyName || lead.name || "Sem nome"}
+                        </h3>
+                        {(lead.companyName || lead.ownerName) && (
+                          <p className="mt-1 text-xs text-outline">
+                            {lead.companyName && lead.companyName !== lead.tradeName ? lead.companyName : lead.ownerName}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button onClick={() => void editLead(lead)} className="rounded-full border border-outline-variant bg-white p-2 transition-colors hover:border-action hover:text-action" title="Editar status">
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => void deleteLead(lead)} className="rounded-full border border-outline-variant bg-white p-2 transition-colors hover:border-red-300 hover:text-red-600" title="Excluir lead">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-1 gap-3 text-sm text-primary sm:grid-cols-2">
+                      <div className="flex items-center gap-2 rounded-2xl bg-white p-3">
+                        <Phone className="h-4 w-4 text-action" />
+                        <span className="truncate font-semibold">{lead.whatsappSuggested || lead.phone || lead.mobile || "Sem telefone"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-2xl bg-white p-3">
+                        <MapPin className="h-4 w-4 text-action" />
+                        <span className="truncate font-semibold">{lead.city || "Cidade não informada"}{lead.uf ? `/${lead.uf}` : ""}</span>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-2xl bg-white p-3 sm:col-span-2">
+                        <Mail className="h-4 w-4 text-action" />
+                        <span className="truncate font-semibold">{lead.email || "E-mail não informado"}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3 rounded-3xl border border-outline-variant bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <Target className="mt-0.5 h-4 w-4 shrink-0 text-action" />
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-outline">Produto indicado</p>
+                          <p className="mt-1 line-clamp-2 text-sm font-semibold text-primary">{lead.recommendedProduct || lead.product || "Sem produto informado"}</p>
                         </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      </div>
+                      {(lead.segment || lead.environment) && (
+                        <div className="flex items-start gap-3">
+                          <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-action" />
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-outline">Segmento / ambiente</p>
+                            <p className="mt-1 line-clamp-2 text-sm text-primary">{lead.segment || lead.environment}</p>
+                          </div>
+                        </div>
+                      )}
+                      {(lead.filterReason || lead.notes) && (
+                        <div className="flex items-start gap-3">
+                          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-action" />
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-outline">Inteligência comercial</p>
+                            <p className="mt-1 line-clamp-3 text-xs leading-5 text-outline">{lead.filterReason || lead.notes}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-widest text-outline">
+                      <span>CNPJ: {lead.cnpj || "-"}</span>
+                      <span>Entrada: {formatLeadDate(lead)}</span>
+                    </div>
+                  </motion.article>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
+        </section>
       </main>
     </div>
   );
