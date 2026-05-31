@@ -1,8 +1,16 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, Droplets, ChevronLeft, ChevronRight } from "lucide-react";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { db } from "../firebase";
+import { Product } from "../types";
 
-const products = [
+type LandingProduct = Product & {
+  desc: string;
+  tags: string[];
+};
+
+const fallbackProducts = [
   {
     id: "veneza",
     name: "Veneza",
@@ -78,9 +86,21 @@ const products = [
       "https://images.unsplash.com/photo-1505693415957-28309913d3bb?q=80&w=2070&auto=format&fit=crop",
     tags: ["Resistente", "Prático"],
   },
-];
+].map((product) => ({ ...product, price: "Sob consulta", status: "Ativo" })) satisfies LandingProduct[];
 
-function ProductCard({ product }: { product: (typeof products)[number] }) {
+function normalizeProduct(product: Product): LandingProduct {
+  return {
+    ...product,
+    desc:
+      product.desc ||
+      (product.price && product.price !== "Sob consulta"
+        ? `Linha ${product.collection} com referência ${product.price}.`
+        : `Solução premium da linha ${product.collection}.`),
+    tags: Array.isArray(product.tags) && product.tags.length > 0 ? product.tags : [product.status || "Ativo", "Casaboni"],
+  };
+}
+
+function ProductCard({ product }: { product: LandingProduct }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -128,12 +148,36 @@ function ProductCard({ product }: { product: (typeof products)[number] }) {
 
 export default function ProductSection() {
   const [currentPage, setCurrentPage] = useState(0);
+  const [dbProducts, setDbProducts] = useState<LandingProduct[]>([]);
+  const products = useMemo(() => (dbProducts.length > 0 ? dbProducts : fallbackProducts), [dbProducts]);
   const productsPerPageDesktop = 3;
-  const totalDesktopPages = Math.ceil(products.length / productsPerPageDesktop);
+  const totalDesktopPages = Math.max(1, Math.ceil(products.length / productsPerPageDesktop));
   const currentDesktopProducts = products.slice(
     currentPage * productsPerPageDesktop,
     (currentPage + 1) * productsPerPageDesktop
   );
+
+  useEffect(() => {
+    const q = query(collection(db, "products"), orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const data = snapshot.docs
+          .map((item) => normalizeProduct({ id: item.id, ...item.data() } as Product))
+          .filter((product) => product.status !== "Inativo");
+        setDbProducts(data);
+      },
+      (error) => {
+        console.warn("Public products read failed, using fallback catalog:", error);
+        setDbProducts([]);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (currentPage >= totalDesktopPages) setCurrentPage(0);
+  }, [currentPage, totalDesktopPages]);
 
   const nextPage = () => setCurrentPage((prev) => (prev + 1) % totalDesktopPages);
   const prevPage = () => setCurrentPage((prev) => (prev - 1 + totalDesktopPages) % totalDesktopPages);

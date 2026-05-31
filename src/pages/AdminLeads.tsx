@@ -4,6 +4,8 @@ import {
   BadgeCheck,
   Building2,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Edit,
   LayoutDashboard,
@@ -20,6 +22,7 @@ import {
   Upload,
   User,
   Users,
+  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import readXlsxFile from "read-excel-file/browser";
@@ -51,6 +54,7 @@ type LeadImportRow = Omit<Lead, "id">;
 const IMPORT_SOURCE = "imported-list";
 const SITE_SOURCE_LABEL = "Site";
 const IMPORT_SOURCE_LABEL = "Importado";
+const PAGE_SIZE = 24;
 
 function normalizeHeader(value: string) {
   return value
@@ -235,6 +239,33 @@ function originClass(lead: Lead) {
     : "bg-action/10 text-action border-action/30";
 }
 
+function phoneForLink(lead: Lead) {
+  const raw = lead.whatsappSuggested || lead.phone || lead.mobile || "";
+  const digits = String(raw).replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.startsWith("55") ? digits : `55${digits}`;
+}
+
+function whatsappHref(lead: Lead) {
+  const phone = phoneForLink(lead);
+  if (!phone) return "";
+  const name = lead.tradeName || lead.companyName || lead.name || "";
+  const text = `Olá${name ? `, ${name}` : ""}! Tudo bem? Aqui é da Casaboni. Estou entrando em contato para falar sobre soluções em pisos, telhas e rodapés.`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+}
+
+function mailHref(lead: Lead) {
+  if (!lead.email) return "";
+  const subject = "Contato Casaboni";
+  const body = `Olá${lead.ownerName ? `, ${lead.ownerName}` : ""}.\n\nTudo bem? Aqui é da Casaboni. Gostaria de falar sobre soluções em pisos, telhas e rodapés para sua empresa.\n\nFico à disposição.`;
+  return `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function mapsHref(lead: Lead) {
+  const query = [lead.address, lead.city, lead.uf].filter(Boolean).join(", ");
+  return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : "";
+}
+
 export default function AdminLeads() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [previewRows, setPreviewRows] = useState<LeadImportRow[]>([]);
@@ -245,6 +276,18 @@ export default function AdminLeads() {
   const [authChecking, setAuthChecking] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [editForm, setEditForm] = useState({
+    status: "",
+    name: "",
+    phone: "",
+    email: "",
+    city: "",
+    uf: "",
+    product: "",
+    notes: "",
+  });
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filteredLeads = useMemo(() => {
@@ -272,6 +315,16 @@ export default function AdminLeads() {
 
   const importedCount = useMemo(() => leads.filter((lead) => getLeadOrigin(lead) === "imported").length, [leads]);
   const siteCount = leads.length - importedCount;
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedLeads = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredLeads.slice(start, start + PAGE_SIZE);
+  }, [currentPage, filteredLeads]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -365,10 +418,39 @@ export default function AdminLeads() {
     }
   };
 
-  const editLead = async (lead: Lead) => {
-    const status = window.prompt("Status do lead:", lead.status || "Novo");
-    if (!status?.trim()) return;
-    await updateDoc(doc(db, "leads", lead.id), { status: status.trim() });
+  const openEditLead = (lead: Lead) => {
+    setEditingLead(lead);
+    setEditForm({
+      status: lead.status || "Novo",
+      name: lead.name || "",
+      phone: lead.phone || lead.whatsappSuggested || lead.mobile || "",
+      email: lead.email || "",
+      city: lead.city || "",
+      uf: lead.uf || "",
+      product: lead.recommendedProduct || lead.product || "",
+      notes: lead.notes || lead.filterReason || "",
+    });
+  };
+
+  const saveLeadEdit = async () => {
+    if (!editingLead) return;
+    try {
+      await updateDoc(doc(db, "leads", editingLead.id), {
+        status: editForm.status.trim() || "Novo",
+        name: editForm.name.trim(),
+        phone: cleanPhone(editForm.phone),
+        email: editForm.email.trim(),
+        city: editForm.city.trim(),
+        uf: editForm.uf.trim().toUpperCase(),
+        product: editForm.product.trim(),
+        recommendedProduct: editForm.product.trim(),
+        notes: editForm.notes.trim(),
+      });
+      setEditingLead(null);
+    } catch (error: any) {
+      console.error("edit lead error:", error);
+      alert(error?.code === "permission-denied" ? "Sem permissão para editar lead." : "Erro ao editar lead.");
+    }
   };
 
   const deleteLead = async (lead: Lead) => {
@@ -494,7 +576,7 @@ export default function AdminLeads() {
           </div>
           <div className="bg-white border border-outline-variant p-5 rounded-3xl shadow-sm">
             <p className="text-[10px] uppercase tracking-[0.25em] text-outline">Exibindo</p>
-            <strong className="block text-3xl text-primary mt-2">{filteredLeads.length}</strong>
+            <strong className="block text-3xl text-primary mt-2">{paginatedLeads.length}</strong>
           </div>
         </section>
 
@@ -552,7 +634,9 @@ export default function AdminLeads() {
               <h2 className="text-xs font-bold uppercase tracking-widest text-primary">Base de Leads</h2>
               <p className="text-xs text-outline mt-1">Cards comerciais com origem, score e próximo status.</p>
             </div>
-            <span className="text-xs font-bold uppercase tracking-widest text-outline">Total: {filteredLeads.length}</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-outline">
+              {filteredLeads.length} leads • Página {currentPage} de {totalPages}
+            </span>
           </div>
 
           <div className="p-6">
@@ -562,7 +646,11 @@ export default function AdminLeads() {
               <div className="p-10 text-center text-outline">Nenhum lead encontrado.</div>
             ) : (
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-                {filteredLeads.map((lead) => (
+                {paginatedLeads.map((lead) => {
+                  const waLink = whatsappHref(lead);
+                  const emailLink = mailHref(lead);
+                  const mapLink = mapsHref(lead);
+                  return (
                   <motion.article
                     key={lead.id}
                     initial={{ opacity: 0, y: 10 }}
@@ -595,7 +683,7 @@ export default function AdminLeads() {
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <button onClick={() => void editLead(lead)} className="rounded-full border border-outline-variant bg-white p-2 transition-colors hover:border-action hover:text-action" title="Editar status">
+                        <button onClick={() => openEditLead(lead)} className="rounded-full border border-outline-variant bg-white p-2 transition-colors hover:border-action hover:text-action" title="Editar lead">
                           <Edit className="h-4 w-4" />
                         </button>
                         <button onClick={() => void deleteLead(lead)} className="rounded-full border border-outline-variant bg-white p-2 transition-colors hover:border-red-300 hover:text-red-600" title="Excluir lead">
@@ -605,18 +693,37 @@ export default function AdminLeads() {
                     </div>
 
                     <div className="mt-5 grid grid-cols-1 gap-3 text-sm text-primary sm:grid-cols-2">
-                      <div className="flex items-center gap-2 rounded-2xl bg-white p-3">
+                      <a
+                        href={waLink || undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => !waLink && event.preventDefault()}
+                        className={`flex items-center gap-2 rounded-2xl bg-white p-3 transition-colors ${waLink ? "hover:bg-action/10 hover:text-action" : "cursor-not-allowed opacity-70"}`}
+                        title={waLink ? "Abrir WhatsApp" : "Telefone indisponível"}
+                      >
                         <Phone className="h-4 w-4 text-action" />
                         <span className="truncate font-semibold">{lead.whatsappSuggested || lead.phone || lead.mobile || "Sem telefone"}</span>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-2xl bg-white p-3">
+                      </a>
+                      <a
+                        href={mapLink || undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => !mapLink && event.preventDefault()}
+                        className={`flex items-center gap-2 rounded-2xl bg-white p-3 transition-colors ${mapLink ? "hover:bg-action/10 hover:text-action" : "cursor-not-allowed opacity-70"}`}
+                        title={mapLink ? "Abrir no Google Maps" : "Localização indisponível"}
+                      >
                         <MapPin className="h-4 w-4 text-action" />
                         <span className="truncate font-semibold">{lead.city || "Cidade não informada"}{lead.uf ? `/${lead.uf}` : ""}</span>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-2xl bg-white p-3 sm:col-span-2">
+                      </a>
+                      <a
+                        href={emailLink || undefined}
+                        onClick={(event) => !emailLink && event.preventDefault()}
+                        className={`flex items-center gap-2 rounded-2xl bg-white p-3 transition-colors sm:col-span-2 ${emailLink ? "hover:bg-action/10 hover:text-action" : "cursor-not-allowed opacity-70"}`}
+                        title={emailLink ? "Enviar e-mail" : "E-mail indisponível"}
+                      >
                         <Mail className="h-4 w-4 text-action" />
                         <span className="truncate font-semibold">{lead.email || "E-mail não informado"}</span>
-                      </div>
+                      </a>
                     </div>
 
                     <div className="mt-4 space-y-3 rounded-3xl border border-outline-variant bg-white p-4">
@@ -652,11 +759,99 @@ export default function AdminLeads() {
                       <span>Entrada: {formatLeadDate(lead)}</span>
                     </div>
                   </motion.article>
-                ))}
+                )})}
+              </div>
+            )}
+
+            {!loading && filteredLeads.length > PAGE_SIZE && (
+              <div className="mt-8 flex flex-col gap-4 border-t border-outline-variant pt-6 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-bold uppercase tracking-widest text-outline">
+                  Mostrando {(currentPage - 1) * PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, filteredLeads.length)} de {filteredLeads.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                    disabled={currentPage === 1}
+                    className="inline-flex items-center gap-2 rounded-full border border-outline-variant bg-white px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary transition-colors hover:border-action hover:text-action disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Anterior
+                  </button>
+                  <span className="rounded-full bg-primary px-4 py-2 text-xs font-bold uppercase tracking-widest text-white">
+                    {currentPage}/{totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                    disabled={currentPage === totalPages}
+                    className="inline-flex items-center gap-2 rounded-full border border-outline-variant bg-white px-4 py-2 text-xs font-bold uppercase tracking-widest text-primary transition-colors hover:border-action hover:text-action disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Próxima <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </section>
+
+        {editingLead && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/60 p-6 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-3xl overflow-hidden rounded-[2rem] bg-white shadow-ambient"
+            >
+              <div className="flex items-start justify-between border-b border-outline-variant p-6">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.3em] text-action">Editar lead</p>
+                  <h3 className="mt-2 text-2xl font-black uppercase tracking-tight text-primary">
+                    {editingLead.tradeName || editingLead.companyName || editingLead.name || "Lead"}
+                  </h3>
+                </div>
+                <button onClick={() => setEditingLead(null)} className="rounded-full border border-outline-variant p-2 text-primary hover:border-action hover:text-action">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="grid gap-4 p-6 md:grid-cols-2">
+                {[
+                  ["Status", "status"],
+                  ["Nome", "name"],
+                  ["WhatsApp / telefone", "phone"],
+                  ["E-mail", "email"],
+                  ["Cidade", "city"],
+                  ["UF", "uf"],
+                  ["Produto indicado", "product"],
+                ].map(([label, key]) => (
+                  <label key={key} className={key === "product" ? "md:col-span-2" : ""}>
+                    <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-outline">{label}</span>
+                    <input
+                      value={editForm[key as keyof typeof editForm]}
+                      onChange={(event) => setEditForm((form) => ({ ...form, [key]: event.target.value }))}
+                      className="w-full rounded-2xl border border-outline-variant bg-surface-low px-4 py-3 text-sm text-primary outline-none transition-colors focus:border-action"
+                    />
+                  </label>
+                ))}
+                <label className="md:col-span-2">
+                  <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-outline">Observações</span>
+                  <textarea
+                    value={editForm.notes}
+                    onChange={(event) => setEditForm((form) => ({ ...form, notes: event.target.value }))}
+                    rows={4}
+                    className="w-full rounded-2xl border border-outline-variant bg-surface-low px-4 py-3 text-sm text-primary outline-none transition-colors focus:border-action"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-outline-variant bg-surface-low p-6">
+                <button onClick={() => setEditingLead(null)} className="rounded-full border border-outline-variant bg-white px-5 py-3 text-xs font-bold uppercase tracking-widest text-primary">
+                  Cancelar
+                </button>
+                <button onClick={() => void saveLeadEdit()} className="rounded-full bg-action px-5 py-3 text-xs font-bold uppercase tracking-widest text-white hover:bg-[#c96a2b]">
+                  Salvar alterações
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </main>
     </div>
   );

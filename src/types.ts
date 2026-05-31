@@ -48,6 +48,8 @@ export interface Product {
   price: string;
   status: string;
   image: string;
+  desc?: string;
+  tags?: string[];
 }
 
 export interface Meeting {
