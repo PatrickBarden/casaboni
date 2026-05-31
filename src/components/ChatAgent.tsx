@@ -155,6 +155,7 @@ export default function ChatAgent() {
         console.info("[Casaboni chat]", data.source);
       }
       const reply = data?.reply || "Pode repetir, por favor?";
+      const followUp = typeof data?.followUp === "string" ? data.followUp.trim() : "";
       const media = Array.isArray(data?.media)
         ? data.media.map((m: any) => ({
             id: String(m.id || ""),
@@ -166,7 +167,11 @@ export default function ChatAgent() {
         : [];
       const safeReply = media.length > 0 ? stripDriveLinks(reply) : reply;
       setMessages((prev) => {
-        const updated = [...prev, { role: "bot" as const, text: safeReply, media }];
+        const botMessages: ChatMessageView[] = [{ role: "bot", text: safeReply, media }];
+        if (followUp) {
+          botMessages.push({ role: "bot", text: followUp });
+        }
+        const updated = [...prev, ...botMessages];
         messagesRef.current = updated;
         return updated;
       });

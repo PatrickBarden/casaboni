@@ -81,6 +81,44 @@ function toNameCase(value: string) {
     .join(" ");
 }
 
+function replyAlreadyAsks(text: string) {
+  const normalized = normalizeText(text);
+  return /\?\s*$/.test(text.trim()) ||
+    /\b(qual|quais|quer|gostaria|prefere|me diga|me passe|confirme|vamos)\b/.test(normalized);
+}
+
+function buildEngagementFollowUp(reply: string, profile: LeadProfile, mediaCount = 0) {
+  if (!reply || replyAlreadyAsks(reply)) return "";
+
+  if (mediaCount > 0) {
+    return "Alguma dessas op\u00e7\u00f5es te agradou? Se quiser, eu tamb\u00e9m posso separar por ambiente ou montar um or\u00e7amento inicial.";
+  }
+
+  if (profile.name && profile.phone) {
+    return "Quer que eu encaminhe essas informa\u00e7\u00f5es para a equipe te chamar no WhatsApp, ou prefere ver mais algumas op\u00e7\u00f5es antes?";
+  }
+
+  if (profile.category && profile.environment && (profile.area || profile.style)) {
+    return "Quer dar uma olhada nas fotos do portf\u00f3lio nessa linha ou prefere que eu j\u00e1 encaminhe um or\u00e7amento inicial?";
+  }
+
+  if (profile.category && profile.environment) {
+    return "Quer que eu te mostre fotos do portf\u00f3lio para esse ambiente, ou prefere seguir escolhendo por estilo?";
+  }
+
+  if (profile.category) {
+    return "Quer ver nosso portf\u00f3lio dessa categoria ou prefere me dizer primeiro o ambiente?";
+  }
+
+  return "Quer dar uma olhada no nosso portf\u00f3lio ou ver fotos de algum produto espec\u00edfico?";
+}
+
+function sanitizeReply(text: string) {
+  const clean = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
+  if (!clean) return "Pode repetir, por favor?";
+  return clean.slice(0, 700);
+}
+
 function parseCatalogEntries(lines: string[]): CatalogEntry[] {
   const entries: CatalogEntry[] = [];
   for (const line of lines) {
@@ -710,12 +748,15 @@ function buildCommercialReply(message: string, history: ChatMessage[], profile: 
     if (!profile.area) {
       return `Boa escolha. Para ${profile.environment}, o ${model} pode funcionar muito bem. Qual a metragem aproximada para eu te orientar com mais seguran\u00e7a?`;
     }
-    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe nome e WhatsApp.`;
+    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer ver mais fotos dessa linha no portf\u00f3lio ou prefere que eu monte um or\u00e7amento inicial?`;
   }
 
   if (enoughToQuote && !botOfferedQuote && !isPhotoIntent(message)) {
     const item = compactProductLabel(profile);
-    return `Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 d\u00e1 para avan\u00e7ar. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe seu nome e WhatsApp.`;
+    const details = [profile.environment, profile.area, profile.style ? `estilo ${profile.style}` : ""].filter(Boolean).join(", ");
+    return details
+      ? `Excelente. Para ${details}, j\u00e1 consigo separar op\u00e7\u00f5es mais alinhadas para voc\u00ea.`
+      : `Excelente. Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 consigo separar op\u00e7\u00f5es mais alinhadas para voc\u00ea.`;
   }
 
   return "";
@@ -1031,6 +1072,7 @@ export async function chatWithGemini(input: {
   const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
 
   const ragContext = await fetchRagContext(input.message, input.customerContext);
+  const leadProfile = buildLeadProfile(input.history, input.message, input.sessionId);
 
   const handlePhotoFlow = isPhotoIntent(input.message) || isPhotoFollowUpSelection(input.history, input.message);
   if (handlePhotoFlow) {
@@ -1038,6 +1080,7 @@ export async function chatWithGemini(input: {
     return {
       reply: photoReply.reply,
       media: photoReply.media,
+      followUp: buildEngagementFollowUp(photoReply.reply, leadProfile, photoReply.media.length),
       source: "photo-flow",
       rag: {
         filesFound: ragContext.filesFound,
@@ -1052,7 +1095,6 @@ export async function chatWithGemini(input: {
   const maybeEmail = extractEmail(input.message);
   const maybeDate = extractDate(input.message);
   const maybeTime = extractTime(input.message);
-  const leadProfile = buildLeadProfile(input.history, input.message, input.sessionId);
 
   if (hasMeetingIntent(input.message) && maybeName && maybeEmail && maybeDate && maybeTime) {
     try {
@@ -1127,6 +1169,7 @@ export async function chatWithGemini(input: {
   if (commercialReply) {
     return {
       reply: commercialReply,
+      followUp: buildEngagementFollowUp(commercialReply, leadProfile),
       source: "commercial-flow",
       rag: {
         filesFound: ragContext.filesFound,
@@ -1139,6 +1182,7 @@ export async function chatWithGemini(input: {
   if (guidedReply) {
     return {
       reply: guidedReply,
+      followUp: buildEngagementFollowUp(guidedReply, leadProfile),
       source: "guided-flow",
       rag: {
         filesFound: ragContext.filesFound,
@@ -1148,10 +1192,12 @@ export async function chatWithGemini(input: {
   }
 
   if (!geminiApiKey) {
+    const reply = buildQuotaFallbackReply(input.message, {
+      driveCatalog: ragContext.driveCatalog,
+    });
     return {
-      reply: buildQuotaFallbackReply(input.message, {
-        driveCatalog: ragContext.driveCatalog,
-      }),
+      reply,
+      followUp: buildEngagementFollowUp(reply, leadProfile),
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,
@@ -1211,8 +1257,10 @@ export async function chatWithGemini(input: {
       response = await chat.sendMessage({ message: toolResults.join("\n") });
     }
 
+    const reply = sanitizeReply(response.text || "Pode repetir, por favor?");
     return {
-      reply: response.text || "Pode repetir, por favor?",
+      reply,
+      followUp: buildEngagementFollowUp(reply, leadProfile),
       source: "gemini",
       rag: {
         filesFound: ragContext.filesFound,
@@ -1230,13 +1278,16 @@ export async function chatWithGemini(input: {
       const photoReply = handlePhotoFlow
         ? buildPhotoReplyFromCatalog(input.message, ragContext.driveCatalog)
         : null;
+      const reply =
+        photoReply?.reply ||
+        buildQuotaFallbackReply(input.message, {
+          driveCatalog: ragContext.driveCatalog,
+        });
+      const media = photoReply?.media || ([] as ChatMedia[]);
       return {
-        reply:
-          photoReply?.reply ||
-          buildQuotaFallbackReply(input.message, {
-            driveCatalog: ragContext.driveCatalog,
-          }),
-        media: photoReply?.media || ([] as ChatMedia[]),
+        reply,
+        media,
+        followUp: buildEngagementFollowUp(reply, leadProfile, media.length),
         rag: {
           filesFound: ragContext.filesFound,
           driveCatalog: ragContext.driveCatalog,
@@ -1248,11 +1299,14 @@ export async function chatWithGemini(input: {
     const photoReply = handlePhotoFlow
       ? buildPhotoReplyFromCatalog(input.message, ragContext.driveCatalog)
       : null;
+    const reply =
+      photoReply?.reply ||
+      "Estou aqui para te ajudar com pisos, rodap\u00e9s, telhas e ripados. Me diga qual ambiente voc\u00ea quer transformar para eu te orientar no produto ideal.";
+    const media = photoReply?.media || ([] as ChatMedia[]);
     return {
-      reply:
-        photoReply?.reply ||
-        "Estou aqui para te ajudar com pisos, rodapés, telhas e ripados. Me diga qual ambiente você quer transformar para eu te orientar no produto ideal.",
-      media: photoReply?.media || ([] as ChatMedia[]),
+      reply,
+      media,
+      followUp: buildEngagementFollowUp(reply, leadProfile, media.length),
       rag: {
         filesFound: ragContext.filesFound,
         driveCatalog: ragContext.driveCatalog,

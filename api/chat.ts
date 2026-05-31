@@ -410,15 +410,51 @@ function buildCommercialReply(message: string, history: ChatMessage[], profile: 
     if (!profile.area) {
       return `Boa escolha. Para ${profile.environment}, o ${model} pode funcionar muito bem. Qual a metragem aproximada para eu te orientar com mais seguran\u00e7a?`;
     }
-    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe nome e WhatsApp.`;
+    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer ver mais fotos dessa linha no portf\u00f3lio ou prefere que eu monte um or\u00e7amento inicial?`;
   }
 
   if (enoughToQuote && !botOfferedQuote && !isPhotoIntent(message)) {
     const item = compactProductLabel(profile);
-    return `Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 d\u00e1 para avan\u00e7ar. Quer que eu encaminhe um or\u00e7amento inicial? Se sim, me passe seu nome e WhatsApp.`;
+    const details = [profile.environment, profile.area, profile.style ? `estilo ${profile.style}` : ""].filter(Boolean).join(", ");
+    return details
+      ? `Excelente. Para ${details}, j\u00e1 consigo separar op\u00e7\u00f5es mais alinhadas para voc\u00ea.`
+      : `Excelente. Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 consigo separar op\u00e7\u00f5es mais alinhadas para voc\u00ea.`;
   }
 
   return "";
+}
+
+
+function replyAlreadyAsks(text: string) {
+  const normalized = normalizeText(text);
+  return /\?\s*$/.test(text.trim()) ||
+    /\b(qual|quais|quer|gostaria|prefere|me diga|me passe|confirme|vamos)\b/.test(normalized);
+}
+
+function buildEngagementFollowUp(reply: string, profile: LeadProfile, mediaCount = 0) {
+  if (!reply || replyAlreadyAsks(reply)) return "";
+
+  if (mediaCount > 0) {
+    return "Alguma dessas op\u00e7\u00f5es te agradou? Se quiser, eu tamb\u00e9m posso separar por ambiente ou montar um or\u00e7amento inicial.";
+  }
+
+  if (profile.name && profile.phone) {
+    return "Quer que eu encaminhe essas informa\u00e7\u00f5es para a equipe te chamar no WhatsApp, ou prefere ver mais algumas op\u00e7\u00f5es antes?";
+  }
+
+  if (profile.category && profile.environment && (profile.area || profile.style)) {
+    return "Quer dar uma olhada nas fotos do portf\u00f3lio nessa linha ou prefere que eu j\u00e1 encaminhe um or\u00e7amento inicial?";
+  }
+
+  if (profile.category && profile.environment) {
+    return "Quer que eu te mostre fotos do portf\u00f3lio para esse ambiente, ou prefere seguir escolhendo por estilo?";
+  }
+
+  if (profile.category) {
+    return "Quer ver nosso portf\u00f3lio dessa categoria ou prefere me dizer primeiro o ambiente?";
+  }
+
+  return "Quer dar uma olhada no nosso portf\u00f3lio ou ver fotos de algum produto espec\u00edfico?";
 }
 
 function parseCatalogEntries(lines: string[]) {
@@ -844,16 +880,20 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const leadProfile = buildLeadProfile(history, message, sessionId);
+
     const rag = await fetchRagContext(message, customerContext);
     const catalog = parseCatalogEntries(rag.driveCatalog);
     const photoFlow = isPhotoIntent(message) || isPhotoFollowUpSelection(history, message);
 
     if (photoFlow) {
       const picked = pickCatalogByIntent(message, catalog);
+      const media = buildMediaFromCatalog(picked.selected);
       res.status(200).json({
         ok: true,
         reply: picked.reply,
-        media: buildMediaFromCatalog(picked.selected),
+        media,
+        followUp: buildEngagementFollowUp(picked.reply, leadProfile, media.length),
         source: "photo-flow",
       });
       return;
@@ -864,7 +904,6 @@ export default async function handler(req: any, res: any) {
     const maybeEmail = extractEmail(message);
     const maybeDate = extractDate(message);
     const maybeTime = extractTime(message);
-    const leadProfile = buildLeadProfile(history, message, sessionId);
 
     if (hasMeetingIntent(message) && maybeName && maybeEmail && maybeDate && maybeTime) {
       try {
@@ -928,22 +967,36 @@ export default async function handler(req: any, res: any) {
 
     const commercial = buildCommercialReply(message, history, leadProfile);
     if (commercial) {
-      res.status(200).json({ ok: true, reply: commercial, media: [], source: "commercial-flow" });
+      res.status(200).json({
+        ok: true,
+        reply: commercial,
+        media: [],
+        followUp: buildEngagementFollowUp(commercial, leadProfile),
+        source: "commercial-flow",
+      });
       return;
     }
 
     const guided = buildGuidedReply(message, history);
     if (guided) {
-      res.status(200).json({ ok: true, reply: guided, media: [], source: "guided-flow" });
+      res.status(200).json({
+        ok: true,
+        reply: guided,
+        media: [],
+        followUp: buildEngagementFollowUp(guided, leadProfile),
+        source: "guided-flow",
+      });
       return;
     }
 
     const key = (process.env.GEMINI_API_KEY || "").trim();
     if (!key) {
+      const reply = "Sou o Consultor Casaboni e estou aqui para te atender. Me diga o ambiente, metragem aproximada e categoria desejada para eu te orientar melhor.";
       res.status(200).json({
         ok: true,
-        reply: "Sou o Consultor Casaboni e estou aqui para te atender. Me diga o ambiente, metragem aproximada e categoria desejada para eu te orientar melhor.",
+        reply,
         media: [],
+        followUp: buildEngagementFollowUp(reply, leadProfile),
       });
       return;
     }
@@ -1044,7 +1097,14 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    res.status(200).json({ ok: true, reply: sanitizeReply(response.text), media: [], source: "gemini" });
+    const aiReply = sanitizeReply(response.text);
+    res.status(200).json({
+      ok: true,
+      reply: aiReply,
+      media: [],
+      followUp: buildEngagementFollowUp(aiReply, leadProfile),
+      source: "gemini",
+    });
   } catch {
     const message = String(req.body?.message || "").trim();
     const exploratoryFallback = hasExplorationIntent(message);
@@ -1054,6 +1114,14 @@ export default async function handler(req: any, res: any) {
         : "Estou aqui para te atender e te ajudar a escolher o produto ideal. Qual ambiente você quer renovar primeiro?"
       : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
 
-    res.status(200).json({ ok: true, reply: fallbackReply, media: [], source: "fallback-error" });
+    const fallbackHistory = Array.isArray(req.body?.history) ? (req.body.history as ChatMessage[]) : [];
+    const fallbackProfile = buildLeadProfile(fallbackHistory, message, String(req.body?.sessionId || ""));
+    res.status(200).json({
+      ok: true,
+      reply: fallbackReply,
+      media: [],
+      followUp: buildEngagementFollowUp(fallbackReply, fallbackProfile),
+      source: "fallback-error",
+    });
   }
 }
