@@ -889,6 +889,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if ((hasLeadIntent(message) || maybePhone) && maybeName && maybePhone) {
+      let leadSaved = false;
       try {
         await saveLead({
           ...leadProfile,
@@ -897,7 +898,10 @@ export default async function handler(req: any, res: any) {
           environment: leadProfile.environment || extractEnvironment(message),
           area: leadProfile.area || extractArea(message),
         });
-      } catch {}
+        leadSaved = true;
+      } catch (error) {
+        console.error("Lead save error:", error);
+      }
       res.status(200).json({
         ok: true,
         reply: leadProfile.city
@@ -905,6 +909,7 @@ export default async function handler(req: any, res: any) {
           : `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`,
         media: [],
         source: "lead-flow",
+        leadSaved,
       });
       return;
     }

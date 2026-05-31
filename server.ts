@@ -1077,6 +1077,7 @@ export async function chatWithGemini(input: {
   }
 
   if ((hasLeadIntent(input.message) || maybePhone) && maybeName && maybePhone) {
+    let leadSaved = false;
     try {
       await saveLead({
         ...leadProfile,
@@ -1085,6 +1086,7 @@ export async function chatWithGemini(input: {
         environment: leadProfile.environment || extractEnvironment(input.message),
         area: leadProfile.area || extractArea(input.message),
       });
+      leadSaved = true;
     } catch (error) {
       console.error("Deterministic saveLead fallback error:", error);
     }
@@ -1092,6 +1094,7 @@ export async function chatWithGemini(input: {
       reply: leadProfile.city
         ? `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. Quer que eu encaminhe o pr\u00f3ximo passo de or\u00e7amento pelo WhatsApp?`
         : `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`,
+      leadSaved,
       source: "lead-flow",
       rag: {
         filesFound: ragContext.filesFound,
