@@ -6,7 +6,7 @@ import {
   getFirestore,
   serverTimestamp,
 } from "firebase/firestore";
-import { getAdminDb } from "./_firebaseAdmin";
+import { getAdminDb } from "./_firebaseAdmin.js";
 
 type ChatMessage = { role: "user" | "bot"; text: string };
 type ProductCategory = "pisos" | "rodapes" | "telhas" | "ripados";

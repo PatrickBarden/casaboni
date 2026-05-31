@@ -12,7 +12,7 @@ import {
   getFirestore,
   serverTimestamp,
 } from "firebase/firestore";
-import { getAdminDb } from "./api/_firebaseAdmin";
+import { getAdminDb } from "./api/_firebaseAdmin.js";
 
 dotenv.config({ path: ".env.local", override: true });
 dotenv.config();
