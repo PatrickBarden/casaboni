@@ -69,6 +69,50 @@ function isGreeting(text: string) {
   return short && /^(oi|ola|bom dia|boa tarde|boa noite|e ai|opa|hello)$/.test(n);
 }
 
+const BASE_SYSTEM_INSTRUCTION = `Você é o "Consultor Casaboni", arquiteto e consultor comercial sênior de arquitetura e acabamentos premium da Casaboni.
+Sua missão é transformar a escolha de acabamentos em uma experiência encantadora, consultiva e de altíssima conversão.
+
+Diretrizes de Personalidade e Abordagem de Vendas:
+1. Empatia em Primeiro Lugar: Sempre acolha a resposta do cliente. Se ele disser que quer transformar a sala, valide: "Piso vinílico na sala é fantástico, traz um aconchego sem igual!". Demonstre entusiasmo real.
+2. Venda Consultiva e Sem Pressa: Não force o orçamento de imediato. Explique o *porquê* de suas perguntas: "Para eu te indicar o modelo ideal com o melhor conforto acústico, deixa eu te perguntar...". Faça apenas UMA pergunta por vez para não sobrecarregar.
+3. Geração de Valor Antes da Captação: Só peça o Nome e WhatsApp quando houver um benefício claro: "Para eu conseguir te enviar nosso catálogo completo em alta resolução com fotos inspiradoras no seu WhatsApp, qual o seu nome e número?".
+4. Tratamento Elegante de Objeções: Se o cliente hesitar em passar dados ou questionar ("por que quer meu WhatsApp?"), seja altamente acolhedor: "Completamente compreensível! Pergunto apenas para enviar o PDF com as fotos em alta, mas podemos continuar por aqui. Qual estilo você prefere?".
+5. Estilo de Escrita: Sofisticado, caloroso, natural e extremamente limpo. Evite jargões frios. Limite-se a 2-3 frases por resposta para manter o ritmo de chat.
+
+Objetivos de Vendas:
+- Posicionar a Casaboni como referência em revestimentos premium.
+- Conduzir o cliente pelas etapas: Acolhimento -> Entendimento do Ambiente (sala, quarto, etc.) -> Definição de Estilo/Metragem -> Oferta de Catálogo/Inspirações (com captação sutil de lead) -> Direcionamento para Orçamento/Agendamento de Consultoria com especialista.
+- Portfólio de Soluções Premium:
+  - Pisos Vinílicos Clicados (100% à prova d'água, instalação rápida, térmicos e acústicos): Veneza, Verona, Florença, Londres, Rio de Janeiro, Washington.
+  - Rodapés de Poliestireno (imunes à umidade, fáceis de limpar, alturas de 7cm e 10cm, acabamento liso/frisado e arredondado).
+  - Telhas Shingle (cobertura de altíssima durabilidade e beleza, em cinza ou preto).
+  - Ripados WPC (madeira ecológica premium de alta durabilidade: Carvalho Ipê, Peroba Jatobá, Cerejeira, Nogueira).
+
+Regras de Ouro:
+- Nunca invente produtos, cores, tamanhos, preços ou prazos que não estejam documentados no contexto.
+- Fale sempre em português do Brasil (pt-BR).
+`;
+
+function isQuestionOrChitChat(text: string): boolean {
+  const normalized = normalizeText(text).trim();
+  if (normalized.includes("?")) return true;
+
+  const questionPatterns = [
+    /\b(como\s+(?:assim|funciona|e|eh|faco)|o\s+que\s+(?:e|eh|significa)|por\s*que|porque|pq|qual\s+o|qual\s+a|quais|de\s+onde|para\s+onde|como\s+voce|quem\s+e|quem\s+eh)\b/i,
+    /\b(tudo\s+bem|tudo\s+bom|como\s+vai|tudo\s+certo|tirar\s+(?:uma\s+)?duvida|quero\s+saber|saber\s+mais|me\s+explica|pode\s+explicar|como\s+funciona|quais\s+sao|qual\s+deles)\b/i
+  ];
+
+  return questionPatterns.some(pattern => pattern.test(normalized));
+}
+
+function buildHistoryText(history: ChatMessage[]) {
+  return history
+    .slice(-8)
+    .map((m) => `${m.role === "user" ? "Cliente" : "Consultor"}: ${m.text}`)
+    .join("\n");
+}
+
+
 function isPhotoIntent(text: string) {
   const n = normalizeText(text);
   return (
@@ -382,6 +426,9 @@ function buildContactRequest(profile: LeadProfile) {
 }
 
 function buildCommercialReply(message: string, history: ChatMessage[], profile: LeadProfile) {
+  if (isQuestionOrChitChat(message)) {
+    return "";
+  }
   const lastBotText = contextText(history, "", "bot");
   const normalizedLastBot = normalizeText(lastBotText);
   const botOfferedQuote =
@@ -665,6 +712,9 @@ function contextFromHistory(history: ChatMessage[]) {
 }
 
 function buildGuidedReply(message: string, history: ChatMessage[]) {
+  if (isQuestionOrChitChat(message)) {
+    return null;
+  }
   const historyCtx = contextFromHistory(history);
   const category = detectCategory(message) || historyCtx.category;
   const environment = extractEnvironment(message) || historyCtx.environment || historyCtx.botEnvironment;
@@ -764,6 +814,15 @@ function buildGuidedReply(message: string, history: ChatMessage[]) {
     if (!style) {
       return `Perfeito, ${environment} com ${area}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
     }
+    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
+  }
+  if (category && environment && area) {
+    if (likelyAreaTypingMistake) {
+      return `Perfeito, ${environment}. Só confirmando para eu não errar na indicação: são ${area} mesmo ou seria ${areaNumber}0m²?`;
+    }
+    if (!style) {
+      return `Perfeito, ${environment} com ${area}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
+    }
     return `Excelente. Para ${environment} com ${area} e estilo ${style}, já consigo separar opções mais alinhadas para você.`;
   }
 
@@ -773,6 +832,41 @@ function sanitizeReply(text: string) {
   const clean = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
   if (!clean) return "Pode repetir, por favor?";
   return clean.slice(0, 700);
+}
+
+function getFunctionDeclarations() {
+  return [
+    {
+      name: "saveLead",
+      description: "Salva dados de um cliente interessado. Chame apenas quando tiver nome e telefone.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING, description: "Nome do cliente" },
+          phone: { type: Type.STRING, description: "Telefone ou WhatsApp" },
+          environment: { type: Type.STRING, description: "Tipo de ambiente" },
+          area: { type: Type.STRING, description: "Area em m2" },
+        },
+        required: ["name", "phone"],
+      },
+    },
+    {
+      name: "scheduleMeeting",
+      description: "Agenda consultoria tecnica. Chame quando houver nome, email, data e horario.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING, description: "Nome do cliente" },
+          email: { type: Type.STRING, description: "Email do cliente" },
+          phone: { type: Type.STRING, description: "Telefone" },
+          date: { type: Type.STRING, description: "Data no formato YYYY-MM-DD" },
+          time: { type: Type.STRING, description: "Horario no formato HH:MM" },
+          topic: { type: Type.STRING, description: "Assunto da reuniao" },
+        },
+        required: ["name", "email", "date", "time"],
+      },
+    },
+  ];
 }
 
 function cleanLeadPayload(args: LeadProfile & { source?: string; status?: string }) {
@@ -806,50 +900,50 @@ async function saveLead(args: LeadProfile & { source?: string; status?: string }
           ...payload,
           updatedAt: new Date(),
         });
-        return true;
+        return `Lead atualizado com sucesso (id: ${existing.docs[0].id}).`;
       }
     }
 
-    await adminDb.collection("leads").add({
+    const ref = await adminDb.collection("leads").add({
       ...payload,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    return true;
+    return `Lead salvo com sucesso (id: ${ref.id}).`;
   }
 
-  if (!db) return false;
+  if (!db) return "Erro: Banco de dados não inicializado.";
 
   // Public Firestore rules allow lead creation, but not public reads.
   // Without Admin credentials, create directly instead of querying by session.
-  await addDoc(collection(db, "leads"), {
+  const ref = await addDoc(collection(db, "leads"), {
     ...payload,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return true;
+  return `Lead salvo com sucesso (id: ${ref.id}).`;
 }
 
 async function scheduleMeeting(args: { name: string; email: string; phone?: string; date: string; time: string; topic?: string }) {
   const adminDb = getAdminDb();
   if (adminDb) {
-    await adminDb.collection("meetings").add({
+    const ref = await adminDb.collection("meetings").add({
       customerName: args.name,
       customerEmail: args.email,
       phone: args.phone || "",
       date: args.date,
       time: args.time,
-      topic: args.topic || "Consultoria T\u00e9cnica",
+      topic: args.topic || "Consultoria Técnica",
       status: "Agendada",
       source: "chat-agent-api",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    return true;
+    return `Reunião agendada com sucesso (id: ${ref.id}).`;
   }
 
-  if (!db) return false;
-  await addDoc(collection(db, "meetings"), {
+  if (!db) return "Erro: Banco de dados não inicializado.";
+  const ref = await addDoc(collection(db, "meetings"), {
     customerName: args.name,
     customerEmail: args.email,
     phone: args.phone || "",
@@ -860,7 +954,7 @@ async function scheduleMeeting(args: { name: string; email: string; phone?: stri
     source: "chat-agent-api",
     createdAt: serverTimestamp(),
   });
-  return true;
+  return `Reunião agendada com sucesso (id: ${ref.id}).`;
 }
 
 export default async function handler(req: any, res: any) {
@@ -1002,102 +1096,57 @@ export default async function handler(req: any, res: any) {
     }
 
     const ai = new GoogleGenAI({ apiKey: key });
-    const conversation = history
-      .slice(-10)
-      .map((m) => `${m.role === "user" ? "Cliente" : "Consultor"}: ${m.text}`)
-      .concat(`Cliente: ${message}`)
-      .join("\n");
-
-    const ragCatalogCompact = catalog.slice(0, 20).map((c) => `- ${c.label}`).join("\n");
-    const ragPromptContext = String(rag.ragPromptContext || "").slice(0, 12000);
-    const ragHints = Array.isArray(rag.systemHints) ? rag.systemHints.slice(0, 20) : [];
-    const response = await ai.models.generateContent({
+    const chat = ai.chats.create({
       model: (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim(),
       config: {
         temperature: 0.2,
-        maxOutputTokens: 280,
-        tools: [
-          {
-            functionDeclarations: [
-              {
-                name: "saveLead",
-                description: "Salvar lead quando nome e telefone forem confirmados",
-                parameters: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    phone: { type: Type.STRING },
-                    environment: { type: Type.STRING },
-                    area: { type: Type.STRING },
-                  },
-                  required: ["name", "phone"],
-                },
-              },
-              {
-                name: "scheduleMeeting",
-                description: "Agendar reunião quando nome, email, data e horário forem confirmados",
-                parameters: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    email: { type: Type.STRING },
-                    phone: { type: Type.STRING },
-                    date: { type: Type.STRING },
-                    time: { type: Type.STRING },
-                    topic: { type: Type.STRING },
-                  },
-                  required: ["name", "email", "date", "time"],
-                },
-              },
-            ],
-          },
-        ],
+        maxOutputTokens: 2048,
+        systemInstruction:
+          BASE_SYSTEM_INSTRUCTION +
+          "\n\nRegras de resposta obrigatórias: nunca inventar produto/preço/prazo, manter continuidade com histórico e fazer apenas 1 pergunta por vez quando faltar contexto." +
+          (rag.ragPromptContext
+            ? `\n\nContexto RAG do Drive:\n${rag.ragPromptContext}`
+            : ""),
+        tools: [{ functionDeclarations: getFunctionDeclarations() }],
       },
-      contents: [
-        "Você é o Consultor Casaboni (vendas consultivas em ambientes).",
-        "Regras obrigatórias:",
-        "- Não invente produtos, preços, estoque, prazos ou políticas.",
-        "- Se faltar dado, faça apenas 1 pergunta objetiva por vez.",
-        "- Mantenha continuidade com o histórico e evite mudar de assunto.",
-        "- Respostas curtas (até 3 frases), em pt-BR, tom profissional e amigável.",
-        "- Se o cliente estiver indeciso, acolha e converse antes de qualificar (ex.: casa/apartamento, estilo de vida, ambiente de maior uso).",
-        "- Ofereça opcionalmente um resumo do portfólio antes de pedir muitos dados técnicos.",
-        "- Se o cliente não souber metragem, ofereça alternativa por faixa (pequeno/médio/grande).",
-        "- Antes de listar produtos, confirme categoria, ambiente e estilo.",
-        "- Produtos Casaboni: pisos, rodapés, telhas shingle e ripados.",
-        "",
-        "Catálogo disponível:",
-        ragCatalogCompact || "- Catálogo não carregado nesta requisição.",
-        "",
-        rag.playbookLoaded
-          ? "Manual oficial do consultor carregado do Drive nesta requisição."
-          : "Manual oficial do consultor não carregado nesta requisição.",
-        ragHints.length ? `Diretrizes RAG resumidas:\n${ragHints.map((h) => `- ${h}`).join("\n")}` : "",
-        ragPromptContext ? `Contexto RAG completo:\n${ragPromptContext}` : "",
-        "",
-        conversation,
-      ].join("\n"),
     });
 
-    if (response.functionCalls?.length) {
-      for (const call of response.functionCalls) {
-        if (call.name === "saveLead") {
-          const args = (call.args || {}) as { name: string; phone: string; environment?: string; area?: string };
-          if (args.name && args.phone) {
-            try { await saveLead(args); } catch {}
-          }
-        }
+    const conversation = [
+      buildHistoryText(history),
+      `Cliente: ${message}`,
+      customerContext ? `Contexto adicional: ${customerContext}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
-        if (call.name === "scheduleMeeting") {
-          const args = (call.args || {}) as { name: string; email: string; phone?: string; date: string; time: string; topic?: string };
-          if (args.name && args.email && args.date && args.time) {
-            try { await scheduleMeeting(args); } catch {}
+    let response = await chat.sendMessage({ message: conversation });
+    let turnLimit = 3;
+    while (response.functionCalls && response.functionCalls.length > 0 && turnLimit > 0) {
+      turnLimit -= 1;
+      const toolResults: string[] = [];
+
+      for (const call of response.functionCalls) {
+        try {
+          if (call.name === "saveLead") {
+            toolResults.push(await saveLead(call.args as any));
+          } else if (call.name === "scheduleMeeting") {
+            toolResults.push(await scheduleMeeting(call.args as any));
+          } else {
+            toolResults.push(`Função não suportada: ${call.name}`);
           }
+        } catch (error) {
+          toolResults.push(
+            `Falha ao executar ${call.name}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
         }
       }
+
+      response = await chat.sendMessage({ message: toolResults.join("\n") });
     }
 
-    const aiReply = sanitizeReply(response.text);
+    const aiReply = sanitizeReply(response.text || "Pode repetir, por favor?");
     res.status(200).json({
       ok: true,
       reply: aiReply,

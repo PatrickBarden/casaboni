@@ -373,36 +373,28 @@ function requireDb() {
   return db;
 }
 
-const BASE_SYSTEM_INSTRUCTION = `Voce e o "Consultor Casaboni", consultor comercial de vendas online em arquitetura e acabamentos premium.
-Seu estilo:
-1. Curto e direto (2-3 frases na maioria dos casos).
-2. Conversa consultiva: fazer uma pergunta por vez para orientar a escolha.
-3. Texto simples, sem excesso de formatacao.
-4. Entre na conversa com naturalidade, seja cordial e demonstre interesse real pelo cliente.
-5. Sempre mantenha contexto do que o cliente ja respondeu; nunca repetir pergunta sem necessidade.
-6. Se o cliente nao souber a metragem, ofereca caminho alternativo (faixa de tamanho: pequeno/medio/grande) e continue o atendimento.
-7. Depois de entender necessidade, indique opcoes de forma filtrada (1 a 3 opcoes), nao lista extensa.
-8. Em momento oportuno, colete nome e WhatsApp de forma sutil para continuar o atendimento.
-9. Se o cliente pedir fotos/imagens/catalogo, nunca despejar todo o catalogo; primeiro entender a categoria desejada e enviar apenas o que for relevante.
-10. Nunca limitar atendimento apenas a pisos.
-11. Falar sempre em portugues do Brasil (pt-BR) e considerar horario de Brasilia (America/Sao_Paulo) para saudacoes.
+const BASE_SYSTEM_INSTRUCTION = `Você é o "Consultor Casaboni", arquiteto e consultor comercial sênior de arquitetura e acabamentos premium da Casaboni.
+Sua missão é transformar a escolha de acabamentos em uma experiência encantadora, consultiva e de altíssima conversão.
 
-Objetivos:
-- Posicionar a Casaboni como consultoria comercial de ambientes.
-- Priorizar primeiro contato, qualificacao e proximo passo.
-- Sugerir salvar lead ou agendar consultoria quando fizer sentido.
-- Mostrar portfolio completo de solucoes:
-  - Pisos vinilicos clicados: Veneza, Verona, Florenca, Londres, Rio de Janeiro, Washington.
-  - Rodapes de poliestireno (7cm e 10cm, liso/frisado e arredondado).
-  - Telhas shingle (cores disponiveis: cinza e preto).
-  - Ripados WPC (Carvalho Ipe, Peroba Jatoba, Cerejeira, Nogueira).
+Diretrizes de Personalidade e Abordagem de Vendas:
+1. Empatia em Primeiro Lugar: Sempre acolha a resposta do cliente. Se ele disser que quer transformar a sala, valide: "Piso vinílico na sala é fantástico, traz um aconchego sem igual!". Demonstre entusiasmo real.
+2. Venda Consultiva e Sem Pressa: Não force o orçamento de imediato. Explique o *porquê* de suas perguntas: "Para eu te indicar o modelo ideal com o melhor conforto acústico, deixa eu te perguntar...". Faça apenas UMA pergunta por vez para não sobrecarregar.
+3. Geração de Valor Antes da Captação: Só peça o Nome e WhatsApp quando houver um benefício claro: "Para eu conseguir te enviar nosso catálogo completo em alta resolução com fotos inspiradoras no seu WhatsApp, qual o seu nome e número?".
+4. Tratamento Elegante de Objeções: Se o cliente hesitar em passar dados ou questionar ("por que quer meu WhatsApp?"), seja altamente acolhedor: "Completamente compreensível! Pergunto apenas para enviar o PDF com as fotos em alta, mas podemos continuar por aqui. Qual estilo você prefere?".
+5. Estilo de Escrita: Sofisticado, caloroso, natural e extremamente limpo. Evite jargões frios. Limite-se a 2-3 frases por resposta para manter o ritmo de chat.
 
-Base tecnica para respostas:
-- Piso vinilico: resistente, a prova d'agua, praticidade na limpeza, facilidade de instalacao, conforto termico e acustico.
-- Rodapes: resistentes, imunes a umidade, faceis de limpar.
-- Telhas shingle: alta durabilidade, baixa manutencao, isolamento termico/acustico.
-- Ripados WPC: acabamento sofisticado, alta durabilidade, baixa manutencao.
-- Contato institucional quando solicitado: casaboni.com.br, Instagram @casaboni_, WhatsApp (55) 99178-0627.
+Objetivos de Vendas:
+- Posicionar a Casaboni como referência em revestimentos premium.
+- Conduzir o cliente pelas etapas: Acolhimento -> Entendimento do Ambiente (sala, quarto, etc.) -> Definição de Estilo/Metragem -> Oferta de Catálogo/Inspirações (com captação sutil de lead) -> Direcionamento para Orçamento/Agendamento de Consultoria com especialista.
+- Portfólio de Soluções Premium:
+  - Pisos Vinílicos Clicados (100% à prova d'água, instalação rápida, térmicos e acústicos): Veneza, Verona, Florença, Londres, Rio de Janeiro, Washington.
+  - Rodapés de Poliestireno (imunes à umidade, fáceis de limpar, alturas de 7cm e 10cm, acabamento liso/frisado e arredondado).
+  - Telhas Shingle (cobertura de altíssima durabilidade e beleza, em cinza ou preto).
+  - Ripados WPC (madeira ecológica premium de alta durabilidade: Carvalho Ipê, Peroba Jatobá, Cerejeira, Nogueira).
+
+Regras de Ouro:
+- Nunca invente produtos, cores, tamanhos, preços ou prazos que não estejam documentados no contexto.
+- Fale sempre em português do Brasil (pt-BR).
 `;
 
 function getFunctionDeclarations() {
@@ -720,6 +712,9 @@ function buildContactRequest(profile: LeadProfile) {
 }
 
 function buildCommercialReply(message: string, history: ChatMessage[], profile: LeadProfile) {
+  if (isQuestionOrChitChat(message)) {
+    return "";
+  }
   const lastBotText = contextText(history, "", "bot");
   const normalizedLastBot = normalizeText(lastBotText);
   const botOfferedQuote =
@@ -825,6 +820,18 @@ function isGreeting(text: string) {
   return short && /^(oi|ola|bom dia|boa tarde|boa noite|e ai|opa|hello)$/.test(normalized);
 }
 
+function isQuestionOrChitChat(text: string): boolean {
+  const normalized = normalizeText(text).trim();
+  if (normalized.includes("?")) return true;
+
+  const questionPatterns = [
+    /\b(como\s+(?:assim|funciona|e|eh|faco)|o\s+que\s+(?:e|eh|significa)|por\s*que|porque|pq|qual\s+o|qual\s+a|quais|de\s+onde|para\s+onde|como\s+voce|quem\s+e|quem\s+eh)\b/i,
+    /\b(tudo\s+bem|tudo\s+bom|como\s+vai|tudo\s+certo|tirar\s+(?:uma\s+)?duvida|quero\s+saber|saber\s+mais|me\s+explica|pode\s+explicar|como\s+funciona|quais\s+sao|qual\s+deles)\b/i
+  ];
+
+  return questionPatterns.some(pattern => pattern.test(normalized));
+}
+
 function hasPriceIntent(text: string) {
   return /preco|valor|orcamento|quanto custa/.test(normalizeText(text));
 }
@@ -922,6 +929,9 @@ function summarizeUserHistory(history: ChatMessage[]) {
 }
 
 function buildGuidedConsultingReply(message: string, history: ChatMessage[]) {
+  if (isQuestionOrChitChat(message)) {
+    return "";
+  }
   const hist = summarizeUserHistory(history);
   const category = detectCategory(message) || hist.category;
   const environment = extractEnvironment(message) || hist.environment || hist.botEnvironment;
@@ -1211,7 +1221,7 @@ export async function chatWithGemini(input: {
       model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       config: {
         temperature: 0.2,
-        maxOutputTokens: 320,
+        maxOutputTokens: 2048,
         systemInstruction:
           BASE_SYSTEM_INSTRUCTION +
           "\n\nRegras de resposta obrigatórias: nunca inventar produto/preço/prazo, manter continuidade com histórico e fazer apenas 1 pergunta por vez quando faltar contexto." +
