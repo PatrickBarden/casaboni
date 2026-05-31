@@ -1,0 +1,655 @@
+﻿{
+    "updatedAt":  "2026-05-30T03:18:07.675Z",
+    "createdAt":  "2026-05-30T02:41:08.063Z",
+    "id":  "uPGoimTtajzFs4vE",
+    "name":  "Casaboni - Drive KB Controller v1",
+    "description":  null,
+    "active":  true,
+    "isArchived":  false,
+    "nodes":  [
+                  {
+                      "id":  "casaboni-webhook-drive-kb",
+                      "name":  "Webhook Drive KB",
+                      "type":  "n8n-nodes-base.webhook",
+                      "typeVersion":  2.1,
+                      "position":  [
+                                       220,
+                                       260
+                                   ],
+                      "parameters":  {
+                                         "httpMethod":  "POST",
+                                         "path":  "casaboni-drive-kb-controller",
+                                         "responseMode":  "responseNode",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "webhookId":  "60de910a-f756-48f2-9e07-3e1138a1cba6",
+                      "onError":  "continueRegularOutput"
+                  },
+                  {
+                      "id":  "casaboni-normalize",
+                      "name":  "Normalizar Payload",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       500,
+                                       260
+                                   ],
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "projectId",
+                                                                                     "name":  "projectId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $json.body.projectId || \u0027casaboni\u0027 }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "driveFolderId",
+                                                                                     "name":  "driveFolderId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $json.body.driveFolderId || $json.body.folderId || \u00271bmCN04bHiHKOam_Qkb48yd7MSvygxZsQ\u0027 }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "requestId",
+                                                                                     "name":  "requestId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $execution.id }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "status",
+                                                                                     "name":  "status",
+                                                                                     "type":  "string",
+                                                                                     "value":  "received"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "casaboni-drive-list",
+                      "name":  "Listar Arquivos Drive",
+                      "type":  "n8n-nodes-base.googleDrive",
+                      "typeVersion":  3,
+                      "position":  [
+                                       760,
+                                       260
+                                   ],
+                      "parameters":  {
+                                         "resource":  "fileFolder",
+                                         "searchMethod":  "query",
+                                         "queryString":  "={{ \"\u0027\" + $json.driveFolderId + \"\u0027 in parents and trashed = false\" }}",
+                                         "filter":  {
+
+                                                    },
+                                         "options":  {
+                                                         "fields":  [
+                                                                        "*"
+                                                                    ],
+                                                         "simplifyOutput":  false
+                                                     }
+                                     },
+                      "credentials":  {
+                                          "googleDriveOAuth2Api":  {
+                                                                       "id":  "6jPAiKyR0Nc91FPG",
+                                                                       "name":  "Google Drive account"
+                                                                   }
+                                      },
+                      "onError":  "continueRegularOutput",
+                      "alwaysOutputData":  true
+                  },
+                  {
+                      "id":  "casaboni-response-shape",
+                      "name":  "Montar Resposta",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       1040,
+                                       260
+                                   ],
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "ok",
+                                                                                     "name":  "ok",
+                                                                                     "type":  "boolean",
+                                                                                     "value":  "={{ true }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "status",
+                                                                                     "name":  "status",
+                                                                                     "type":  "string",
+                                                                                     "value":  "drive_kb_ready"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "projectId",
+                                                                                     "name":  "projectId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $(\u0027Normalizar Payload\u0027).item.json.projectId }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "driveFolderId",
+                                                                                     "name":  "driveFolderId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $(\u0027Normalizar Payload\u0027).item.json.driveFolderId }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "filesFound",
+                                                                                     "name":  "filesFound",
+                                                                                     "type":  "number",
+                                                                                     "value":  "={{ $items(\u0027Listar Arquivos Drive\u0027).map(i =\u003e i.json || {}).filter(f =\u003e f.id || f.name || f.mimeType || f.webViewLink).length }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "filesJson",
+                                                                                     "name":  "filesJson",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ JSON.stringify($items(\u0027Listar Arquivos Drive\u0027).map(i =\u003e i.json || {}).filter(f =\u003e f.id || f.name || f.mimeType || f.webViewLink).map(f =\u003e ({ id: f.id, name: f.name, mimeType: f.mimeType, webViewLink: f.webViewLink, modifiedTime: f.modifiedTime, size: f.size }))) }}"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "casaboni-respond",
+                      "name":  "Responder",
+                      "type":  "n8n-nodes-base.respondToWebhook",
+                      "typeVersion":  1.5,
+                      "position":  [
+                                       1310,
+                                       260
+                                   ],
+                      "parameters":  {
+                                         "respondWith":  "json",
+                                         "responseBody":  "={{ JSON.stringify($json) }}",
+                                         "options":  {
+                                                         "responseCode":  200
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "casaboni-manual",
+                      "name":  "Manual Test Trigger",
+                      "type":  "n8n-nodes-base.manualTrigger",
+                      "typeVersion":  1,
+                      "position":  [
+                                       220,
+                                       500
+                                   ],
+                      "parameters":  {
+
+                                     }
+                  },
+                  {
+                      "id":  "casaboni-manual-payload",
+                      "name":  "Payload Teste Manual",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       500,
+                                       500
+                                   ],
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "body",
+                                                                                     "name":  "body",
+                                                                                     "type":  "object",
+                                                                                     "value":  "={{ { projectId: \u0027casaboni\u0027, driveFolderId: \u0027\u0027, force: true } }}"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  }
+              ],
+    "connections":  {
+                        "Webhook Drive KB":  {
+                                                 "main":  [
+                                                              [
+                                                                  {
+                                                                      "node":  "Normalizar Payload",
+                                                                      "type":  "main",
+                                                                      "index":  0
+                                                                  }
+                                                              ]
+                                                          ]
+                                             },
+                        "Manual Test Trigger":  {
+                                                    "main":  [
+                                                                 [
+                                                                     {
+                                                                         "node":  "Payload Teste Manual",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ]
+                                                             ]
+                                                },
+                        "Payload Teste Manual":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Normalizar Payload",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "Normalizar Payload":  {
+                                                   "main":  [
+                                                                [
+                                                                    {
+                                                                        "node":  "Listar Arquivos Drive",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "Listar Arquivos Drive":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Montar Resposta",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Montar Resposta":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Responder",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1",
+                     "saveDataErrorExecution":  "all",
+                     "saveDataSuccessExecution":  "all",
+                     "saveManualExecutions":  true,
+                     "callerPolicy":  "workflowsFromSameOwner",
+                     "availableInMCP":  false
+                 },
+    "staticData":  null,
+    "meta":  null,
+    "pinData":  null,
+    "versionId":  "86b1da7b-1bd0-44a9-9b2c-5cce7e36fd7a",
+    "activeVersionId":  "86b1da7b-1bd0-44a9-9b2c-5cce7e36fd7a",
+    "versionCounter":  14,
+    "triggerCount":  1,
+    "shared":  [
+                   {
+                       "updatedAt":  "2026-05-30T02:41:08.063Z",
+                       "createdAt":  "2026-05-30T02:41:08.063Z",
+                       "role":  "workflow:owner",
+                       "workflowId":  "uPGoimTtajzFs4vE",
+                       "projectId":  "NVWPtCEKeD4ChQBx",
+                       "project":  {
+                                       "updatedAt":  "2025-09-23T20:54:00.618Z",
+                                       "createdAt":  "2025-09-23T20:52:19.630Z",
+                                       "id":  "NVWPtCEKeD4ChQBx",
+                                       "name":  "Barden Desenvolvimento \u003cbardendesenvolvimento@gmail.com\u003e",
+                                       "type":  "personal",
+                                       "icon":  null,
+                                       "description":  null,
+                                       "creatorId":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894",
+                                       "projectRelations":  [
+                                                                {
+                                                                    "updatedAt":  "2025-09-23T20:52:19.630Z",
+                                                                    "createdAt":  "2025-09-23T20:52:19.630Z",
+                                                                    "userId":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894",
+                                                                    "projectId":  "NVWPtCEKeD4ChQBx",
+                                                                    "user":  {
+                                                                                 "updatedAt":  "2026-05-31T05:00:47.763Z",
+                                                                                 "createdAt":  "2025-09-23T20:52:19.279Z",
+                                                                                 "id":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894",
+                                                                                 "email":  "bardendesenvolvimento@gmail.com",
+                                                                                 "firstName":  "Barden",
+                                                                                 "lastName":  "Desenvolvimento",
+                                                                                 "personalizationAnswers":  {
+                                                                                                                "version":  "v4",
+                                                                                                                "personalization_survey_submitted_at":  "2025-09-23T20:54:33.090Z",
+                                                                                                                "personalization_survey_n8n_version":  "1.112.4",
+                                                                                                                "companySize":  "\u003c20",
+                                                                                                                "companyType":  "saas",
+                                                                                                                "role":  "business-owner",
+                                                                                                                "reportedSource":  "youtube"
+                                                                                                            },
+                                                                                 "settings":  {
+                                                                                                  "userActivated":  true,
+                                                                                                  "easyAIWorkflowOnboarded":  true,
+                                                                                                  "firstSuccessfulWorkflowId":  "RCAye3ctghzhc5qi",
+                                                                                                  "userActivatedAt":  1780113881933,
+                                                                                                  "npsSurvey":  {
+                                                                                                                    "responded":  true,
+                                                                                                                    "lastShownAt":  1770655521382
+                                                                                                                }
+                                                                                              },
+                                                                                 "disabled":  false,
+                                                                                 "mfaEnabled":  false,
+                                                                                 "lastActiveAt":  "2026-05-31",
+                                                                                 "isPending":  false
+                                                                             }
+                                                                }
+                                                            ]
+                                   }
+                   }
+               ],
+    "tags":  [
+
+             ],
+    "activeVersion":  {
+                          "updatedAt":  "2026-05-30T03:18:07.676Z",
+                          "createdAt":  "2026-05-30T03:18:07.676Z",
+                          "versionId":  "86b1da7b-1bd0-44a9-9b2c-5cce7e36fd7a",
+                          "workflowId":  "uPGoimTtajzFs4vE",
+                          "nodes":  [
+                                        {
+                                            "id":  "casaboni-webhook-drive-kb",
+                                            "name":  "Webhook Drive KB",
+                                            "type":  "n8n-nodes-base.webhook",
+                                            "typeVersion":  2.1,
+                                            "position":  [
+                                                             220,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "httpMethod":  "POST",
+                                                               "path":  "casaboni-drive-kb-controller",
+                                                               "responseMode":  "responseNode",
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "webhookId":  "60de910a-f756-48f2-9e07-3e1138a1cba6",
+                                            "onError":  "continueRegularOutput"
+                                        },
+                                        {
+                                            "id":  "casaboni-normalize",
+                                            "name":  "Normalizar Payload",
+                                            "type":  "n8n-nodes-base.set",
+                                            "typeVersion":  3.4,
+                                            "position":  [
+                                                             500,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "assignments":  {
+                                                                                   "assignments":  [
+                                                                                                       {
+                                                                                                           "id":  "projectId",
+                                                                                                           "name":  "projectId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $json.body.projectId || \u0027casaboni\u0027 }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "driveFolderId",
+                                                                                                           "name":  "driveFolderId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $json.body.driveFolderId || $json.body.folderId || \u00271bmCN04bHiHKOam_Qkb48yd7MSvygxZsQ\u0027 }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "requestId",
+                                                                                                           "name":  "requestId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $execution.id }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "status",
+                                                                                                           "name":  "status",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "received"
+                                                                                                       }
+                                                                                                   ]
+                                                                               },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-drive-list",
+                                            "name":  "Listar Arquivos Drive",
+                                            "type":  "n8n-nodes-base.googleDrive",
+                                            "typeVersion":  3,
+                                            "position":  [
+                                                             760,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "resource":  "fileFolder",
+                                                               "searchMethod":  "query",
+                                                               "queryString":  "={{ \"\u0027\" + $json.driveFolderId + \"\u0027 in parents and trashed = false\" }}",
+                                                               "filter":  {
+
+                                                                          },
+                                                               "options":  {
+                                                                               "fields":  [
+                                                                                              "*"
+                                                                                          ],
+                                                                               "simplifyOutput":  false
+                                                                           }
+                                                           },
+                                            "credentials":  {
+                                                                "googleDriveOAuth2Api":  {
+                                                                                             "id":  "6jPAiKyR0Nc91FPG",
+                                                                                             "name":  "Google Drive account"
+                                                                                         }
+                                                            },
+                                            "onError":  "continueRegularOutput",
+                                            "alwaysOutputData":  true
+                                        },
+                                        {
+                                            "id":  "casaboni-response-shape",
+                                            "name":  "Montar Resposta",
+                                            "type":  "n8n-nodes-base.set",
+                                            "typeVersion":  3.4,
+                                            "position":  [
+                                                             1040,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "assignments":  {
+                                                                                   "assignments":  [
+                                                                                                       {
+                                                                                                           "id":  "ok",
+                                                                                                           "name":  "ok",
+                                                                                                           "type":  "boolean",
+                                                                                                           "value":  "={{ true }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "status",
+                                                                                                           "name":  "status",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "drive_kb_ready"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "projectId",
+                                                                                                           "name":  "projectId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $(\u0027Normalizar Payload\u0027).item.json.projectId }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "driveFolderId",
+                                                                                                           "name":  "driveFolderId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $(\u0027Normalizar Payload\u0027).item.json.driveFolderId }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "filesFound",
+                                                                                                           "name":  "filesFound",
+                                                                                                           "type":  "number",
+                                                                                                           "value":  "={{ $items(\u0027Listar Arquivos Drive\u0027).map(i =\u003e i.json || {}).filter(f =\u003e f.id || f.name || f.mimeType || f.webViewLink).length }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "filesJson",
+                                                                                                           "name":  "filesJson",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ JSON.stringify($items(\u0027Listar Arquivos Drive\u0027).map(i =\u003e i.json || {}).filter(f =\u003e f.id || f.name || f.mimeType || f.webViewLink).map(f =\u003e ({ id: f.id, name: f.name, mimeType: f.mimeType, webViewLink: f.webViewLink, modifiedTime: f.modifiedTime, size: f.size }))) }}"
+                                                                                                       }
+                                                                                                   ]
+                                                                               },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-respond",
+                                            "name":  "Responder",
+                                            "type":  "n8n-nodes-base.respondToWebhook",
+                                            "typeVersion":  1.5,
+                                            "position":  [
+                                                             1310,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "respondWith":  "json",
+                                                               "responseBody":  "={{ JSON.stringify($json) }}",
+                                                               "options":  {
+                                                                               "responseCode":  200
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-manual",
+                                            "name":  "Manual Test Trigger",
+                                            "type":  "n8n-nodes-base.manualTrigger",
+                                            "typeVersion":  1,
+                                            "position":  [
+                                                             220,
+                                                             500
+                                                         ],
+                                            "parameters":  {
+
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-manual-payload",
+                                            "name":  "Payload Teste Manual",
+                                            "type":  "n8n-nodes-base.set",
+                                            "typeVersion":  3.4,
+                                            "position":  [
+                                                             500,
+                                                             500
+                                                         ],
+                                            "parameters":  {
+                                                               "assignments":  {
+                                                                                   "assignments":  [
+                                                                                                       {
+                                                                                                           "id":  "body",
+                                                                                                           "name":  "body",
+                                                                                                           "type":  "object",
+                                                                                                           "value":  "={{ { projectId: \u0027casaboni\u0027, driveFolderId: \u0027\u0027, force: true } }}"
+                                                                                                       }
+                                                                                                   ]
+                                                                               },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        }
+                                    ],
+                          "connections":  {
+                                              "Webhook Drive KB":  {
+                                                                       "main":  [
+                                                                                    [
+                                                                                        {
+                                                                                            "node":  "Normalizar Payload",
+                                                                                            "type":  "main",
+                                                                                            "index":  0
+                                                                                        }
+                                                                                    ]
+                                                                                ]
+                                                                   },
+                                              "Manual Test Trigger":  {
+                                                                          "main":  [
+                                                                                       [
+                                                                                           {
+                                                                                               "node":  "Payload Teste Manual",
+                                                                                               "type":  "main",
+                                                                                               "index":  0
+                                                                                           }
+                                                                                       ]
+                                                                                   ]
+                                                                      },
+                                              "Payload Teste Manual":  {
+                                                                           "main":  [
+                                                                                        [
+                                                                                            {
+                                                                                                "node":  "Normalizar Payload",
+                                                                                                "type":  "main",
+                                                                                                "index":  0
+                                                                                            }
+                                                                                        ]
+                                                                                    ]
+                                                                       },
+                                              "Normalizar Payload":  {
+                                                                         "main":  [
+                                                                                      [
+                                                                                          {
+                                                                                              "node":  "Listar Arquivos Drive",
+                                                                                              "type":  "main",
+                                                                                              "index":  0
+                                                                                          }
+                                                                                      ]
+                                                                                  ]
+                                                                     },
+                                              "Listar Arquivos Drive":  {
+                                                                            "main":  [
+                                                                                         [
+                                                                                             {
+                                                                                                 "node":  "Montar Resposta",
+                                                                                                 "type":  "main",
+                                                                                                 "index":  0
+                                                                                             }
+                                                                                         ]
+                                                                                     ]
+                                                                        },
+                                              "Montar Resposta":  {
+                                                                      "main":  [
+                                                                                   [
+                                                                                       {
+                                                                                           "node":  "Responder",
+                                                                                           "type":  "main",
+                                                                                           "index":  0
+                                                                                       }
+                                                                                   ]
+                                                                               ]
+                                                                  }
+                                          },
+                          "authors":  "Barden Desenvolvimento",
+                          "name":  null,
+                          "description":  null,
+                          "autosaved":  false,
+                          "workflowPublishHistory":  [
+                                                         {
+                                                             "createdAt":  "2026-05-30T03:18:07.791Z",
+                                                             "id":  451,
+                                                             "workflowId":  "uPGoimTtajzFs4vE",
+                                                             "versionId":  "86b1da7b-1bd0-44a9-9b2c-5cce7e36fd7a",
+                                                             "event":  "activated",
+                                                             "userId":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894"
+                                                         }
+                                                     ]
+                      }
+}

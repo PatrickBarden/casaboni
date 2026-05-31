@@ -1,0 +1,739 @@
+﻿{
+    "updatedAt":  "2026-05-31T05:01:39.522Z",
+    "createdAt":  "2026-05-30T02:41:32.796Z",
+    "id":  "EjzZ68Qy7SAf0CNN",
+    "name":  "Casaboni - RAG Query Endpoint v1",
+    "description":  null,
+    "active":  true,
+    "isArchived":  false,
+    "nodes":  [
+                  {
+                      "parameters":  {
+                                         "httpMethod":  "POST",
+                                         "path":  "casaboni-rag-query",
+                                         "responseMode":  "responseNode",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-webhook",
+                      "name":  "Webhook RAG Query",
+                      "type":  "n8n-nodes-base.webhook",
+                      "typeVersion":  2.1,
+                      "position":  [
+                                       224,
+                                       272
+                                   ],
+                      "webhookId":  "3d8791cb-f4b6-4941-b1eb-25cf0ae11afc",
+                      "onError":  "continueRegularOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "question",
+                                                                                     "name":  "question",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $json.body.message || $json.body.question || \u0027\u0027 }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "driveFolderId",
+                                                                                     "name":  "driveFolderId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $json.body.driveFolderId || \u00271bmCN04bHiHKOam_Qkb48yd7MSvygxZsQ\u0027 }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "customerContext",
+                                                                                     "name":  "customerContext",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $json.body.customerContext || \u0027\u0027 }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "playbookDocumentId",
+                                                                                     "name":  "playbookDocumentId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $json.body.playbookDocumentId || \u00271LjbBSKje0Ym2Lrrli5Jr4k_lX_OwrN7yPXiktWN6AKQ\u0027 }}"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "requestId",
+                                                                                     "name":  "requestId",
+                                                                                     "type":  "string",
+                                                                                     "value":  "={{ $execution.id }}"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-normalize",
+                      "name":  "Normalizar Consulta",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       512,
+                                       272
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "resource":  "fileFolder",
+                                         "searchMethod":  "query",
+                                         "queryString":  "={{ \"\u0027\" + $(\u0027Normalizar Consulta\u0027).item.json.driveFolderId + \"\u0027 in parents and trashed = false\" }}",
+                                         "filter":  {
+
+                                                    },
+                                         "options":  {
+                                                         "fields":  [
+                                                                        "*"
+                                                                    ]
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-drive-list",
+                      "name":  "Listar Arquivos Contexto",
+                      "type":  "n8n-nodes-base.googleDrive",
+                      "typeVersion":  3,
+                      "position":  [
+                                       784,
+                                       416
+                                   ],
+                      "alwaysOutputData":  true,
+                      "credentials":  {
+                                          "googleDriveOAuth2Api":  {
+                                                                       "id":  "6jPAiKyR0Nc91FPG",
+                                                                       "name":  "Google Drive account"
+                                                                   }
+                                      },
+                      "onError":  "continueRegularOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const playbookRaw = String($items(\u0027Extrair Texto Manual\u0027)[0]?.json?.playbookText || \u0027\u0027);\nlet playbookText = playbookRaw.replace(/\\u0000/g, \u0027\u0027).trim();\nif (playbookText.length \u003e 8000) playbookText = playbookText.slice(0, 8000);\n\nconst rawItems = $items(\u0027Listar Arquivos Contexto\u0027).map(i =\u003e i.json || {});\nconst hasDriveError = rawItems.some((it) =\u003e typeof it.error === \u0027string\u0027 \u0026\u0026 it.error.length \u003e 0);\nconst files = hasDriveError\n  ? []\n  : rawItems.filter((f) =\u003e f.id || f.name || f.fileName || f.title || f.originalFilename);\n\nconst enriched = files\n  .map((f) =\u003e {\n    const name = f.name || f.fileName || f.title || f.originalFilename || \u0027\u0027;\n    const link = f.webViewLink || (f.id ? `https://drive.google.com/file/d/${f.id}/view` : \u0027\u0027);\n    return { name, link };\n  })\n  .filter((f) =\u003e f.name)\n  .slice(0, 40);\n\nconst contextLines = enriched.map((f, idx) =\u003e `${idx + 1}. ${f.name}${f.link ? ` - ${f.link}` : \u0027\u0027}`);\n\nconst businessKnowledge = [\n  \u0027A Casaboni trabalha com acabamentos completos, nao apenas pisos.\u0027,\n  \u0027Solucoes principais: pisos vinilicos clicados, rodapes de poliestireno, telhas shingle e ripados WPC.\u0027,\n  \u0027Linhas de piso: Veneza, Verona, Florenca, Londres, Rio de Janeiro e Washington.\u0027,\n  \u0027Beneficios do piso vinilico: resistencia, prova d\\\u0027agua, limpeza pratica, instalacao facilitada e conforto termico/acustico.\u0027,\n  \u0027Rodapes disponiveis em 7cm e 10cm (liso, frisado e arredondado).\u0027,\n  \u0027Telhas shingle: alta durabilidade, baixa manutencao, isolamento termico/acustico, cores cinza e preto.\u0027,\n  \u0027Ripados WPC: acabamento sofisticado, resistentes e faceis de manter; opcoes Carvalho Ipe, Peroba Jatoba, Cerejeira e Nogueira.\u0027,\n  \u0027Contato institucional: www.casaboni.com.br, WhatsApp (55) 99178-0627, Instagram @casaboni_.\u0027,\n  \u0027Se pedirem fotos, compartilhar somente a categoria solicitada.\u0027\n];\n\nconst systemHints = [\n  \u0027Atendimento inicial Casaboni: objetivo, cordial e consultivo.\u0027,\n  \u0027Entender ambiente, metragem, estilo e prazo antes da recomendacao final.\u0027,\n  \u0027Nunca limitar a conversa apenas a pisos quando o cliente perguntar por outras solucoes.\u0027,\n  ...businessKnowledge\n];\n\nconst ragPromptContext = [\n  playbookText ? \u0027Manual oficial do consultor (Drive):\\n\u0027 + playbookText : \u0027Manual oficial do consultor indisponivel nesta requisicao.\u0027,\n  \u0027\u0027,\n  \u0027Base de conhecimento Casaboni (arquivos no Drive):\u0027,\n  ...contextLines,\n  \u0027\u0027,\n  \u0027Resumo do portfolio e posicionamento:\u0027,\n  ...businessKnowledge,\n  \u0027\u0027,\n  \u0027Diretrizes de atendimento:\u0027,\n  ...systemHints\n].join(\u0027\\n\u0027);\n\nreturn [{\n  json: {\n    ok: true,\n    requestId: $(\u0027Normalizar Consulta\u0027).item.json.requestId,\n    question: $(\u0027Normalizar Consulta\u0027).item.json.question,\n    customerContext: $(\u0027Normalizar Consulta\u0027).item.json.customerContext,\n    filesFound: enriched.length,\n    driveCatalog: contextLines,\n    playbookLoaded: Boolean(playbookText),\n    driveError: hasDriveError ? (rawItems[0]?.error || \u0027Erro ao listar arquivos no Drive\u0027) : \u0027\u0027,\n    systemHints,\n    ragPromptContext\n  }\n}];"
+                                     },
+                      "id":  "casaboni-rag-build-context",
+                      "name":  "Montar Contexto",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1040,
+                                       272
+                                   ],
+                      "onError":  "continueRegularOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "respondWith":  "json",
+                                         "responseBody":  "={{ JSON.stringify($json) }}",
+                                         "options":  {
+                                                         "responseCode":  200
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-response",
+                      "name":  "Responder",
+                      "type":  "n8n-nodes-base.respondToWebhook",
+                      "typeVersion":  1.5,
+                      "position":  [
+                                       1312,
+                                       272
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+
+                                     },
+                      "id":  "casaboni-rag-manual",
+                      "name":  "Manual Test Trigger",
+                      "type":  "n8n-nodes-base.manualTrigger",
+                      "typeVersion":  1,
+                      "position":  [
+                                       224,
+                                       512
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "body",
+                                                                                     "name":  "body",
+                                                                                     "type":  "object",
+                                                                                     "value":  "={{ { message: \u0027Quais pisos vocês têm?\u0027, driveFolderId: \u0027\u0027, customerContext: \u0027cliente residencial\u0027 } }}"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-payload",
+                      "name":  "Payload Teste Manual",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       512,
+                                       512
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "download",
+                                         "fileId":  {
+                                                        "__rl":  true,
+                                                        "value":  "={{ $(\u0027Normalizar Consulta\u0027).item.json.playbookDocumentId }}",
+                                                        "mode":  "id"
+                                                    },
+                                         "options":  {
+                                                         "binaryPropertyName":  "playbook",
+                                                         "googleFileConversion":  {
+                                                                                      "conversion":  {
+                                                                                                         "docsToFormat":  "text/plain"
+                                                                                                     }
+                                                                                  }
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-playbook-download",
+                      "name":  "Ler Manual Consultor",
+                      "type":  "n8n-nodes-base.googleDrive",
+                      "typeVersion":  3,
+                      "position":  [
+                                       736,
+                                       16
+                                   ],
+                      "alwaysOutputData":  true,
+                      "credentials":  {
+                                          "googleDriveOAuth2Api":  {
+                                                                       "id":  "6jPAiKyR0Nc91FPG",
+                                                                       "name":  "Google Drive account"
+                                                                   }
+                                      },
+                      "onError":  "continueRegularOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "operation":  "text",
+                                         "binaryPropertyName":  "playbook",
+                                         "destinationKey":  "playbookText",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "casaboni-rag-playbook-extract",
+                      "name":  "Extrair Texto Manual",
+                      "type":  "n8n-nodes-base.extractFromFile",
+                      "typeVersion":  1,
+                      "position":  [
+                                       768,
+                                       192
+                                   ],
+                      "alwaysOutputData":  true,
+                      "onError":  "continueRegularOutput"
+                  }
+              ],
+    "connections":  {
+                        "Webhook RAG Query":  {
+                                                  "main":  [
+                                                               [
+                                                                   {
+                                                                       "node":  "Normalizar Consulta",
+                                                                       "type":  "main",
+                                                                       "index":  0
+                                                                   }
+                                                               ]
+                                                           ]
+                                              },
+                        "Manual Test Trigger":  {
+                                                    "main":  [
+                                                                 [
+                                                                     {
+                                                                         "node":  "Payload Teste Manual",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ]
+                                                             ]
+                                                },
+                        "Payload Teste Manual":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Normalizar Consulta",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "Listar Arquivos Contexto":  {
+                                                         "main":  [
+                                                                      [
+                                                                          {
+                                                                              "node":  "Montar Contexto",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "Montar Contexto":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Responder",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Normalizar Consulta":  {
+                                                    "main":  [
+                                                                 [
+                                                                     {
+                                                                         "node":  "Ler Manual Consultor",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ]
+                                                             ]
+                                                },
+                        "Ler Manual Consultor":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Extrair Texto Manual",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "Extrair Texto Manual":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Listar Arquivos Contexto",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 }
+                    },
+    "settings":  {
+                     "executionOrder":  "v1",
+                     "saveDataErrorExecution":  "all",
+                     "saveDataSuccessExecution":  "all",
+                     "saveManualExecutions":  true,
+                     "callerPolicy":  "workflowsFromSameOwner",
+                     "availableInMCP":  false
+                 },
+    "staticData":  null,
+    "meta":  null,
+    "pinData":  {
+
+                },
+    "versionId":  "9399a790-51ea-463e-a63f-f04cf6e7ddcf",
+    "activeVersionId":  "924e7e73-ea33-47a7-9b5e-10e9f370090d",
+    "versionCounter":  34,
+    "triggerCount":  1,
+    "shared":  [
+                   {
+                       "updatedAt":  "2026-05-30T02:41:32.796Z",
+                       "createdAt":  "2026-05-30T02:41:32.796Z",
+                       "role":  "workflow:owner",
+                       "workflowId":  "EjzZ68Qy7SAf0CNN",
+                       "projectId":  "NVWPtCEKeD4ChQBx",
+                       "project":  {
+                                       "updatedAt":  "2025-09-23T20:54:00.618Z",
+                                       "createdAt":  "2025-09-23T20:52:19.630Z",
+                                       "id":  "NVWPtCEKeD4ChQBx",
+                                       "name":  "Barden Desenvolvimento \u003cbardendesenvolvimento@gmail.com\u003e",
+                                       "type":  "personal",
+                                       "icon":  null,
+                                       "description":  null,
+                                       "creatorId":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894",
+                                       "projectRelations":  [
+                                                                {
+                                                                    "updatedAt":  "2025-09-23T20:52:19.630Z",
+                                                                    "createdAt":  "2025-09-23T20:52:19.630Z",
+                                                                    "userId":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894",
+                                                                    "projectId":  "NVWPtCEKeD4ChQBx",
+                                                                    "user":  {
+                                                                                 "updatedAt":  "2026-05-31T05:00:47.763Z",
+                                                                                 "createdAt":  "2025-09-23T20:52:19.279Z",
+                                                                                 "id":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894",
+                                                                                 "email":  "bardendesenvolvimento@gmail.com",
+                                                                                 "firstName":  "Barden",
+                                                                                 "lastName":  "Desenvolvimento",
+                                                                                 "personalizationAnswers":  {
+                                                                                                                "version":  "v4",
+                                                                                                                "personalization_survey_submitted_at":  "2025-09-23T20:54:33.090Z",
+                                                                                                                "personalization_survey_n8n_version":  "1.112.4",
+                                                                                                                "companySize":  "\u003c20",
+                                                                                                                "companyType":  "saas",
+                                                                                                                "role":  "business-owner",
+                                                                                                                "reportedSource":  "youtube"
+                                                                                                            },
+                                                                                 "settings":  {
+                                                                                                  "userActivated":  true,
+                                                                                                  "easyAIWorkflowOnboarded":  true,
+                                                                                                  "firstSuccessfulWorkflowId":  "RCAye3ctghzhc5qi",
+                                                                                                  "userActivatedAt":  1780113881933,
+                                                                                                  "npsSurvey":  {
+                                                                                                                    "responded":  true,
+                                                                                                                    "lastShownAt":  1770655521382
+                                                                                                                }
+                                                                                              },
+                                                                                 "disabled":  false,
+                                                                                 "mfaEnabled":  false,
+                                                                                 "lastActiveAt":  "2026-05-31",
+                                                                                 "isPending":  false
+                                                                             }
+                                                                }
+                                                            ]
+                                   }
+                   }
+               ],
+    "tags":  [
+
+             ],
+    "activeVersion":  {
+                          "updatedAt":  "2026-05-30T16:41:21.886Z",
+                          "createdAt":  "2026-05-30T16:41:21.886Z",
+                          "versionId":  "924e7e73-ea33-47a7-9b5e-10e9f370090d",
+                          "workflowId":  "EjzZ68Qy7SAf0CNN",
+                          "nodes":  [
+                                        {
+                                            "id":  "casaboni-rag-webhook",
+                                            "name":  "Webhook RAG Query",
+                                            "type":  "n8n-nodes-base.webhook",
+                                            "typeVersion":  2.1,
+                                            "position":  [
+                                                             220,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "httpMethod":  "POST",
+                                                               "path":  "casaboni-rag-query",
+                                                               "responseMode":  "responseNode",
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "webhookId":  "3d8791cb-f4b6-4941-b1eb-25cf0ae11afc",
+                                            "onError":  "continueRegularOutput"
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-normalize",
+                                            "name":  "Normalizar Consulta",
+                                            "type":  "n8n-nodes-base.set",
+                                            "typeVersion":  3.4,
+                                            "position":  [
+                                                             500,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "assignments":  {
+                                                                                   "assignments":  [
+                                                                                                       {
+                                                                                                           "id":  "question",
+                                                                                                           "name":  "question",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $json.body.message || $json.body.question || \u0027\u0027 }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "driveFolderId",
+                                                                                                           "name":  "driveFolderId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $json.body.driveFolderId || \u00271bmCN04bHiHKOam_Qkb48yd7MSvygxZsQ\u0027 }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "customerContext",
+                                                                                                           "name":  "customerContext",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $json.body.customerContext || \u0027\u0027 }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "playbookDocumentId",
+                                                                                                           "name":  "playbookDocumentId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $json.body.playbookDocumentId || \u00271LjbBSKje0Ym2Lrrli5Jr4k_lX_OwrN7yPXiktWN6AKQ\u0027 }}"
+                                                                                                       },
+                                                                                                       {
+                                                                                                           "id":  "requestId",
+                                                                                                           "name":  "requestId",
+                                                                                                           "type":  "string",
+                                                                                                           "value":  "={{ $execution.id }}"
+                                                                                                       }
+                                                                                                   ]
+                                                                               },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-drive-list",
+                                            "name":  "Listar Arquivos Contexto",
+                                            "type":  "n8n-nodes-base.googleDrive",
+                                            "typeVersion":  3,
+                                            "position":  [
+                                                             760,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "resource":  "fileFolder",
+                                                               "searchMethod":  "query",
+                                                               "queryString":  "={{ \"\u0027\" + $(\u0027Normalizar Consulta\u0027).item.json.driveFolderId + \"\u0027 in parents and trashed = false\" }}",
+                                                               "filter":  {
+
+                                                                          },
+                                                               "options":  {
+                                                                               "fields":  [
+                                                                                              "*"
+                                                                                          ],
+                                                                               "simplifyOutput":  false
+                                                                           }
+                                                           },
+                                            "credentials":  {
+                                                                "googleDriveOAuth2Api":  {
+                                                                                             "id":  "6jPAiKyR0Nc91FPG",
+                                                                                             "name":  "Google Drive account"
+                                                                                         }
+                                                            },
+                                            "onError":  "continueRegularOutput",
+                                            "alwaysOutputData":  true
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-build-context",
+                                            "name":  "Montar Contexto",
+                                            "type":  "n8n-nodes-base.code",
+                                            "typeVersion":  2,
+                                            "position":  [
+                                                             1030,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "jsCode":  "const playbookRaw = String($items(\u0027Extrair Texto Manual\u0027)[0]?.json?.playbookText || \u0027\u0027);\nlet playbookText = playbookRaw.replace(/\\u0000/g, \u0027\u0027).trim();\nif (playbookText.length \u003e 8000) playbookText = playbookText.slice(0, 8000);\n\nconst rawItems = $items(\u0027Listar Arquivos Contexto\u0027).map(i =\u003e i.json || {});\nconst hasDriveError = rawItems.some((it) =\u003e typeof it.error === \u0027string\u0027 \u0026\u0026 it.error.length \u003e 0);\nconst files = hasDriveError\n  ? []\n  : rawItems.filter((f) =\u003e f.id || f.name || f.fileName || f.title || f.originalFilename);\n\nconst enriched = files\n  .map((f) =\u003e {\n    const name = f.name || f.fileName || f.title || f.originalFilename || \u0027\u0027;\n    const link = f.webViewLink || (f.id ? `https://drive.google.com/file/d/${f.id}/view` : \u0027\u0027);\n    return { name, link };\n  })\n  .filter((f) =\u003e f.name)\n  .slice(0, 40);\n\nconst contextLines = enriched.map((f, idx) =\u003e `${idx + 1}. ${f.name}${f.link ? ` - ${f.link}` : \u0027\u0027}`);\n\nconst businessKnowledge = [\n  \u0027A Casaboni trabalha com acabamentos completos, nao apenas pisos.\u0027,\n  \u0027Solucoes principais: pisos vinilicos clicados, rodapes de poliestireno, telhas shingle e ripados WPC.\u0027,\n  \u0027Linhas de piso: Veneza, Verona, Florenca, Londres, Rio de Janeiro e Washington.\u0027,\n  \u0027Beneficios do piso vinilico: resistencia, prova d\\\u0027agua, limpeza pratica, instalacao facilitada e conforto termico/acustico.\u0027,\n  \u0027Rodapes disponiveis em 7cm e 10cm (liso, frisado e arredondado).\u0027,\n  \u0027Telhas shingle: alta durabilidade, baixa manutencao, isolamento termico/acustico, cores cinza e preto.\u0027,\n  \u0027Ripados WPC: acabamento sofisticado, resistentes e faceis de manter; opcoes Carvalho Ipe, Peroba Jatoba, Cerejeira e Nogueira.\u0027,\n  \u0027Contato institucional: www.casaboni.com.br, WhatsApp (55) 99178-0627, Instagram @casaboni_.\u0027,\n  \u0027Se pedirem fotos, compartilhar somente a categoria solicitada.\u0027\n];\n\nconst systemHints = [\n  \u0027Atendimento inicial Casaboni: objetivo, cordial e consultivo.\u0027,\n  \u0027Entender ambiente, metragem, estilo e prazo antes da recomendacao final.\u0027,\n  \u0027Nunca limitar a conversa apenas a pisos quando o cliente perguntar por outras solucoes.\u0027,\n  ...businessKnowledge\n];\n\nconst ragPromptContext = [\n  playbookText ? \u0027Manual oficial do consultor (Drive):\\n\u0027 + playbookText : \u0027Manual oficial do consultor indisponivel nesta requisicao.\u0027,\n  \u0027\u0027,\n  \u0027Base de conhecimento Casaboni (arquivos no Drive):\u0027,\n  ...contextLines,\n  \u0027\u0027,\n  \u0027Resumo do portfolio e posicionamento:\u0027,\n  ...businessKnowledge,\n  \u0027\u0027,\n  \u0027Diretrizes de atendimento:\u0027,\n  ...systemHints\n].join(\u0027\\n\u0027);\n\nreturn [{\n  json: {\n    ok: true,\n    requestId: $(\u0027Normalizar Consulta\u0027).item.json.requestId,\n    question: $(\u0027Normalizar Consulta\u0027).item.json.question,\n    customerContext: $(\u0027Normalizar Consulta\u0027).item.json.customerContext,\n    filesFound: enriched.length,\n    driveCatalog: contextLines,\n    playbookLoaded: Boolean(playbookText),\n    driveError: hasDriveError ? (rawItems[0]?.error || \u0027Erro ao listar arquivos no Drive\u0027) : \u0027\u0027,\n    systemHints,\n    ragPromptContext\n  }\n}];"
+                                                           },
+                                            "onError":  "continueRegularOutput"
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-response",
+                                            "name":  "Responder",
+                                            "type":  "n8n-nodes-base.respondToWebhook",
+                                            "typeVersion":  1.5,
+                                            "position":  [
+                                                             1300,
+                                                             260
+                                                         ],
+                                            "parameters":  {
+                                                               "respondWith":  "json",
+                                                               "responseBody":  "={{ JSON.stringify($json) }}",
+                                                               "options":  {
+                                                                               "responseCode":  200
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-manual",
+                                            "name":  "Manual Test Trigger",
+                                            "type":  "n8n-nodes-base.manualTrigger",
+                                            "typeVersion":  1,
+                                            "position":  [
+                                                             220,
+                                                             500
+                                                         ],
+                                            "parameters":  {
+
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-payload",
+                                            "name":  "Payload Teste Manual",
+                                            "type":  "n8n-nodes-base.set",
+                                            "typeVersion":  3.4,
+                                            "position":  [
+                                                             500,
+                                                             500
+                                                         ],
+                                            "parameters":  {
+                                                               "assignments":  {
+                                                                                   "assignments":  [
+                                                                                                       {
+                                                                                                           "id":  "body",
+                                                                                                           "name":  "body",
+                                                                                                           "type":  "object",
+                                                                                                           "value":  "={{ { message: \u0027Quais pisos vocês têm?\u0027, driveFolderId: \u0027\u0027, customerContext: \u0027cliente residencial\u0027 } }}"
+                                                                                                       }
+                                                                                                   ]
+                                                                               },
+                                                               "options":  {
+
+                                                                           }
+                                                           }
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-playbook-download",
+                                            "name":  "Ler Manual Consultor",
+                                            "type":  "n8n-nodes-base.googleDrive",
+                                            "typeVersion":  3,
+                                            "position":  [
+                                                             760,
+                                                             120
+                                                         ],
+                                            "parameters":  {
+                                                               "resource":  "file",
+                                                               "operation":  "download",
+                                                               "fileId":  {
+                                                                              "__rl":  true,
+                                                                              "value":  "={{ $(\u0027Normalizar Consulta\u0027).item.json.playbookDocumentId }}",
+                                                                              "mode":  "id"
+                                                                          },
+                                                               "options":  {
+                                                                               "binaryPropertyName":  "playbook",
+                                                                               "googleFileConversion":  {
+                                                                                                            "conversion":  {
+                                                                                                                               "docsToFormat":  "text/plain"
+                                                                                                                           }
+                                                                                                        }
+                                                                           }
+                                                           },
+                                            "credentials":  {
+                                                                "googleDriveOAuth2Api":  {
+                                                                                             "id":  "6jPAiKyR0Nc91FPG",
+                                                                                             "name":  "Google Drive account"
+                                                                                         }
+                                                            },
+                                            "onError":  "continueRegularOutput",
+                                            "alwaysOutputData":  true
+                                        },
+                                        {
+                                            "id":  "casaboni-rag-playbook-extract",
+                                            "name":  "Extrair Texto Manual",
+                                            "type":  "n8n-nodes-base.extractFromFile",
+                                            "typeVersion":  1,
+                                            "position":  [
+                                                             760,
+                                                             190
+                                                         ],
+                                            "parameters":  {
+                                                               "operation":  "text",
+                                                               "binaryPropertyName":  "playbook",
+                                                               "destinationKey":  "playbookText",
+                                                               "options":  {
+
+                                                                           }
+                                                           },
+                                            "onError":  "continueRegularOutput",
+                                            "alwaysOutputData":  true
+                                        }
+                                    ],
+                          "connections":  {
+                                              "Webhook RAG Query":  {
+                                                                        "main":  [
+                                                                                     [
+                                                                                         {
+                                                                                             "node":  "Normalizar Consulta",
+                                                                                             "type":  "main",
+                                                                                             "index":  0
+                                                                                         }
+                                                                                     ]
+                                                                                 ]
+                                                                    },
+                                              "Manual Test Trigger":  {
+                                                                          "main":  [
+                                                                                       [
+                                                                                           {
+                                                                                               "node":  "Payload Teste Manual",
+                                                                                               "type":  "main",
+                                                                                               "index":  0
+                                                                                           }
+                                                                                       ]
+                                                                                   ]
+                                                                      },
+                                              "Payload Teste Manual":  {
+                                                                           "main":  [
+                                                                                        [
+                                                                                            {
+                                                                                                "node":  "Normalizar Consulta",
+                                                                                                "type":  "main",
+                                                                                                "index":  0
+                                                                                            }
+                                                                                        ]
+                                                                                    ]
+                                                                       },
+                                              "Listar Arquivos Contexto":  {
+                                                                               "main":  [
+                                                                                            [
+                                                                                                {
+                                                                                                    "node":  "Montar Contexto",
+                                                                                                    "type":  "main",
+                                                                                                    "index":  0
+                                                                                                }
+                                                                                            ]
+                                                                                        ]
+                                                                           },
+                                              "Montar Contexto":  {
+                                                                      "main":  [
+                                                                                   [
+                                                                                       {
+                                                                                           "node":  "Responder",
+                                                                                           "type":  "main",
+                                                                                           "index":  0
+                                                                                       }
+                                                                                   ]
+                                                                               ]
+                                                                  },
+                                              "Normalizar Consulta":  {
+                                                                          "main":  [
+                                                                                       [
+                                                                                           {
+                                                                                               "node":  "Ler Manual Consultor",
+                                                                                               "type":  "main",
+                                                                                               "index":  0
+                                                                                           }
+                                                                                       ]
+                                                                                   ]
+                                                                      },
+                                              "Ler Manual Consultor":  {
+                                                                           "main":  [
+                                                                                        [
+                                                                                            {
+                                                                                                "node":  "Extrair Texto Manual",
+                                                                                                "type":  "main",
+                                                                                                "index":  0
+                                                                                            }
+                                                                                        ]
+                                                                                    ]
+                                                                       },
+                                              "Extrair Texto Manual":  {
+                                                                           "main":  [
+                                                                                        [
+                                                                                            {
+                                                                                                "node":  "Listar Arquivos Contexto",
+                                                                                                "type":  "main",
+                                                                                                "index":  0
+                                                                                            }
+                                                                                        ]
+                                                                                    ]
+                                                                       }
+                                          },
+                          "authors":  "Barden Desenvolvimento",
+                          "name":  null,
+                          "description":  null,
+                          "autosaved":  false,
+                          "workflowPublishHistory":  [
+                                                         {
+                                                             "createdAt":  "2026-05-30T16:41:21.975Z",
+                                                             "id":  459,
+                                                             "workflowId":  "EjzZ68Qy7SAf0CNN",
+                                                             "versionId":  "924e7e73-ea33-47a7-9b5e-10e9f370090d",
+                                                             "event":  "activated",
+                                                             "userId":  "8dbdf415-1a15-4df4-a49c-9a8139cfd894"
+                                                         }
+                                                     ]
+                      }
+}

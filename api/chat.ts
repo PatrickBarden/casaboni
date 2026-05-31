@@ -12,6 +12,12 @@ type ChatMessage = { role: "user" | "bot"; text: string };
 type ProductCategory = "pisos" | "rodapes" | "telhas" | "ripados";
 type CatalogEntry = { label: string; url: string };
 type ChatMedia = { id: string; label: string; sourceUrl: string; thumbnailUrl: string };
+type ChatInput = {
+  message: string;
+  history: ChatMessage[];
+  customerContext?: string;
+  sessionId?: string;
+};
 type LeadProfile = {
   name?: string;
   phone?: string;
@@ -47,6 +53,63 @@ const hasFirebaseConfig = Boolean(
 const firebaseApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
 const db = firebaseApp ? getFirestore(firebaseApp, firestoreDatabaseId) : null;
 
+function getN8nSdrWebhookUrl() {
+  const explicit = (process.env.N8N_SDR_WEBHOOK_URL || "").trim();
+  if (explicit) return explicit;
+
+  const ragWebhook = (process.env.N8N_RAG_WEBHOOK_URL || "").trim();
+  if (ragWebhook.includes("/casaboni-rag-query")) {
+    return ragWebhook.replace("/casaboni-rag-query", "/casaboni-sdr-agent");
+  }
+
+  return "";
+}
+
+async function chatWithN8nSdr(input: ChatInput) {
+  const webhookUrl = getN8nSdrWebhookUrl();
+  if (!webhookUrl) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        message: input.message,
+        history: input.history,
+        customerContext: input.customerContext || "",
+        sessionId: input.sessionId || "",
+        geminiApiKey: (process.env.GEMINI_API_KEY || "").trim(),
+        geminiModel: (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim(),
+        ragWebhookUrl: (process.env.N8N_RAG_WEBHOOK_URL || "").trim(),
+        driveFolderId: (process.env.N8N_DRIVE_FOLDER_ID || "").trim(),
+        firebase: {
+          apiKey: firebaseConfig.apiKey,
+          projectId: firebaseConfig.projectId,
+          databaseId: firestoreDatabaseId,
+        },
+      }),
+    });
+
+    if (!response.ok) throw new Error(`n8n SDR HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data?.ok || !data?.reply) throw new Error("n8n SDR returned invalid response");
+    return {
+      ...data,
+      media: Array.isArray(data.media) ? data.media : [],
+      source: data.source || "n8n-sdr-agent",
+    };
+  } catch (error) {
+    console.error("n8n SDR webhook error:", error);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizeText(text: string) {
   return text
     .toLowerCase()
@@ -63,105 +126,38 @@ function toNameCase(value: string) {
     .join(" ");
 }
 
-function isGreeting(text: string) {
-  const n = normalizeText(text).trim();
-  const short = n.split(/\s+/).length <= 3;
-  return short && /^(oi|ola|bom dia|boa tarde|boa noite|e ai|opa|hello)$/.test(n);
-}
-
 const BASE_SYSTEM_INSTRUCTION = `Você é o "Consultor Casaboni", arquiteto e consultor comercial sênior de arquitetura e acabamentos premium da Casaboni.
-Sua missão é transformar a escolha de acabamentos em uma experiência encantadora, consultiva e de altíssima conversão.
+Sua missão é transformar o atendimento comercial de revestimentos em uma conversa consultiva apaixonante, natural, empática e de altíssima conversão.
 
-Diretrizes de Personalidade e Abordagem de Vendas:
-1. Empatia em Primeiro Lugar: Sempre acolha a resposta do cliente. Se ele disser que quer transformar a sala, valide: "Piso vinílico na sala é fantástico, traz um aconchego sem igual!". Demonstre entusiasmo real.
-2. Venda Consultiva e Sem Pressa: Não force o orçamento de imediato. Explique o *porquê* de suas perguntas: "Para eu te indicar o modelo ideal com o melhor conforto acústico, deixa eu te perguntar...". Faça apenas UMA pergunta por vez para não sobrecarregar.
-3. Geração de Valor Antes da Captação: Só peça o Nome e WhatsApp quando houver um benefício claro: "Para eu conseguir te enviar nosso catálogo completo em alta resolução com fotos inspiradoras no seu WhatsApp, qual o seu nome e número?".
-4. Tratamento Elegante de Objeções: Se o cliente hesitar em passar dados ou questionar ("por que quer meu WhatsApp?"), seja altamente acolhedor: "Completamente compreensível! Pergunto apenas para enviar o PDF com as fotos em alta, mas podemos continuar por aqui. Qual estilo você prefere?".
-5. Estilo de Escrita: Sofisticado, caloroso, natural e extremamente limpo. Evite jargões frios. Limite-se a 2-3 frases por resposta para manter o ritmo de chat.
+DIRETRIZES DE COMPORTAMENTO E VENDAS:
+1. Conversa Fluida e Humana: Esqueça fluxos engessados ou scripts robóticos. Converse como um especialista atencioso e entusiasmado. Se o cliente disser "oi, tudo bem?", responda com calor humano, valide o momento dele e pergunte qual transformação ou projeto ele tem em mente hoje.
+2. Escuta Ativa e Validação Empática: ANTES de fazer qualquer pergunta de qualificação, valide e elogie o que o cliente disse. Se ele quer reformar o quarto: "Quarto é nosso refúgio de descanso! Um piso vinílico lá é simplesmente perfeito porque traz um conforto térmico fantástico para andar descalço e uma acústica excelente."
+3. Uma Pergunta por Vez: Nunca bombardeie o cliente com várias perguntas. Conduza o papo de forma ritmada, fazendo apenas uma pergunta natural e contextualizada por resposta.
+4. Geração de Valor Absoluta: Só solicite o Nome e WhatsApp quando fizer sentido no contexto. Nunca peça dados friamente de início. Exemplo de abordagem correta: "Tenho fotos incríveis desse modelo Verona instalado exatamente em salas integradas. Consigo te enviar esse portfólio completo em alta definição no WhatsApp para você se inspirar. Qual o seu nome e número de WhatsApp para eu te encaminhar?"
+5. Tratamento Elegante de Objeções: 
+   - Se o cliente perguntar "quanto custa?", explique que o valor varia com a metragem e acabamento, mas dê uma estimativa elegante baseada no produto de interesse ou pergunte o tamanho do espaço para calcular com precisão.
+   - Se ele hesitar em passar o WhatsApp: "Compreendo perfeitamente! Fique super tranquilo. Podemos continuar conversando por aqui mesmo no chat. Qual estilo de acabamento mais te chama atenção hoje?"
+6. Uso Inteligente de Ferramentas (Tools):
+   - Use 'searchDriveFiles' sempre que o cliente pedir fotos, catálogos, imagens reais ou informações sobre produtos. Envie o link real recebido da ferramenta em sua resposta para que o cliente possa clicar.
+   - Use 'saveLead' silenciosamente assim que conseguir o nome e telefone/WhatsApp do cliente. Não comente que "está salvando no CRM", apenas continue a conversa com elegância. Você também pode chamar 'saveLead' com outros dados coletados (ambiente, metragem, estilo, produto, cidade) para manter o perfil atualizado.
+   - Use 'scheduleMeeting' caso o cliente demonstre interesse em agendar uma consultoria técnica por videoconferência com nossos engenheiros ou arquitetos.
 
-Objetivos de Vendas:
-- Posicionar a Casaboni como referência em revestimentos premium.
-- Conduzir o cliente pelas etapas: Acolhimento -> Entendimento do Ambiente (sala, quarto, etc.) -> Definição de Estilo/Metragem -> Oferta de Catálogo/Inspirações (com captação sutil de lead) -> Direcionamento para Orçamento/Agendamento de Consultoria com especialista.
-- Portfólio de Soluções Premium:
-  - Pisos Vinílicos Clicados (100% à prova d'água, instalação rápida, térmicos e acústicos): Veneza, Verona, Florença, Londres, Rio de Janeiro, Washington.
-  - Rodapés de Poliestireno (imunes à umidade, fáceis de limpar, alturas de 7cm e 10cm, acabamento liso/frisado e arredondado).
-  - Telhas Shingle (cobertura de altíssima durabilidade e beleza, em cinza ou preto).
-  - Ripados WPC (madeira ecológica premium de alta durabilidade: Carvalho Ipê, Peroba Jatobá, Cerejeira, Nogueira).
+PORTFÓLIO DE SOLUÇÕES PREMIUM CASABONI:
+- Pisos Vinílicos Clicados (100% à prova d'água, instalação ultra-rápida, térmicos, acústicos e confortáveis): Verona (tom amadeirado clássico e elegante), Veneza (claro, moderno, traz amplitude), Florença (suave, ideal para quartos), Londres (estilo contemporâneo), Rio de Janeiro (sofisticado), Washington.
+- Rodapés de Poliestireno (imunes à umidade, fáceis de limpar, alturas de 7cm e 10cm, acabamento liso ou frisado).
+- Telhas Shingle (cobertura de altíssima durabilidade, beleza europeia e resistência, disponíveis em cinza ou preto).
+- Ripados WPC (madeira ecológica premium de alta durabilidade e zero manutenção: Carvalho Ipê, Peroba Jatobá, Cerejeira, Nogueira).
 
 Regras de Ouro:
 - Nunca invente produtos, cores, tamanhos, preços ou prazos que não estejam documentados no contexto.
 - Fale sempre em português do Brasil (pt-BR).
-`;
-
-function isQuestionOrChitChat(text: string): boolean {
-  const normalized = normalizeText(text).trim();
-  if (normalized.includes("?")) return true;
-
-  const questionPatterns = [
-    /\b(como\s+(?:assim|funciona|e|eh|faco)|o\s+que\s+(?:e|eh|significa)|por\s*que|porque|pq|qual\s+o|qual\s+a|quais|de\s+onde|para\s+onde|como\s+voce|quem\s+e|quem\s+eh)\b/i,
-    /\b(tudo\s+bem|tudo\s+bom|como\s+vai|tudo\s+certo|tirar\s+(?:uma\s+)?duvida|quero\s+saber|saber\s+mais|me\s+explica|pode\s+explicar|como\s+funciona|quais\s+sao|qual\s+deles)\b/i
-  ];
-
-  return questionPatterns.some(pattern => pattern.test(normalized));
-}
+- Seja breve e envolvente: limite suas respostas a 2 ou 3 parágrafos curtos para manter a dinâmica do chat viva.`;
 
 function buildHistoryText(history: ChatMessage[]) {
   return history
     .slice(-8)
     .map((m) => `${m.role === "user" ? "Cliente" : "Consultor"}: ${m.text}`)
     .join("\n");
-}
-
-
-function isPhotoIntent(text: string) {
-  const n = normalizeText(text);
-  return (
-    n.includes("foto") ||
-    n.includes("imagem") ||
-    n.includes("catalogo") ||
-    n.includes("portfolio") ||
-    n.includes("portifolio")
-  );
-}
-
-function isPriceIntent(text: string) {
-  return /preco|valor|orcamento|quanto custa/.test(normalizeText(text));
-}
-
-function hasMeetingIntent(text: string) {
-  return /agendar|reuniao|consultoria/.test(normalizeText(text));
-}
-
-function hasLeadIntent(text: string) {
-  return /salvar|cadastro|cadastrar|contato|whatsapp/.test(normalizeText(text));
-}
-
-function hasFrustrationIntent(text: string) {
-  const n = normalizeText(text);
-  return /nao entende|nao entendeu|nao entende nada|errado|nada a ver|burro|burra|repetindo|voce nao entende|vc nao entende/.test(n);
-}
-
-function hasExplorationIntent(text: string) {
-  const n = normalizeText(text);
-  const raw = text.toLowerCase();
-  return (
-    /nao sei bem|nao sei o que|nao sei escolher|estou em duvida|to em duvida|indecis|so olhando|sugestoes|ideias|me ajuda a escolher/.test(
-      n
-    ) || /n.o sei bem|n.o sei o que|n.o sei escolher|duvid/.test(raw)
-  );
-}
-
-function hasUnknownAreaIntent(text: string) {
-  const n = normalizeText(text);
-  const raw = text.toLowerCase();
-  const mentionsAreaContext =
-    /metragem|medida|area|m2|m\u00b2|metro/.test(n) || /\b\d+\s*m(?:2|\u00b2)?\b/i.test(raw);
-  return (
-    /sem metragem|sem medida/.test(n) ||
-    (/nao lembro|nao sei|sem ideia|nao tenho ideia|nao tenho certeza|nao recordo|nao faco ideia/.test(n) &&
-      mentionsAreaContext) ||
-    (/n.o lembro|n.o sei|n.o tenho certeza|n.o recordo/.test(raw) && mentionsAreaContext)
-  );
 }
 
 function extractStyle(text: string) {
@@ -350,33 +346,6 @@ function extractCity(text: string) {
   return "";
 }
 
-function hasPositiveChoiceIntent(text: string) {
-  const n = normalizeText(text);
-  return /gostei|curti|amei|prefiro|quero esse|quero essa|esse mesmo|essa mesmo|ficou bom|me agradou/.test(n);
-}
-
-function hasQuoteIntent(text: string) {
-  const n = normalizeText(text);
-  return isPriceIntent(text) || /orcamento|orçamento|orc|proposta|comprar|fechar|pedido|quanto fica|me passa valor|quero simular/.test(n);
-}
-
-function isYesIntent(text: string) {
-  const n = normalizeText(text).trim();
-  return /^(sim|quero|claro|pode|pode sim|vamos|bora|ok|fechado|manda|me chama|quero sim)$/.test(n);
-}
-
-function contextText(history: ChatMessage[], message: string, role: "user" | "bot" = "user") {
-  return [
-    ...history
-      .filter((m) => m.role === role)
-      .slice(-12)
-      .map((m) => m.text),
-    role === "user" ? message : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
 function buildLeadProfile(history: ChatMessage[], message: string, sessionId?: string): LeadProfile {
   const userTexts = [
     ...history
@@ -405,73 +374,6 @@ function buildLeadProfile(history: ChatMessage[], message: string, sessionId?: s
   };
 }
 
-function compactProductLabel(profile: LeadProfile) {
-  return [profile.product, profile.category].filter(Boolean).join(" / ") || "";
-}
-
-function buildContactRequest(profile: LeadProfile) {
-  if (!profile.name && !profile.phone) {
-    return "Consigo deixar isso encaminhado para or\u00e7amento. Qual seu nome e WhatsApp para eu salvar seu atendimento e a equipe retornar certinho?";
-  }
-  if (!profile.name) {
-    return "Perfeito, recebi seu WhatsApp. Qual seu nome para eu deixar o atendimento identificado no CRM?";
-  }
-  if (!profile.phone) {
-    return `Perfeito, ${profile.name}. Qual WhatsApp posso salvar para a equipe te retornar com o pr\u00f3ximo passo?`;
-  }
-  if (!profile.city) {
-    return `Perfeito, ${profile.name}. J\u00e1 deixei seu atendimento salvo. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`;
-  }
-  return `Perfeito, ${profile.name}. J\u00e1 deixei seu atendimento salvo com a cidade ${profile.city}. Quer que eu siga refinando as op\u00e7\u00f5es por aqui ou prefere que a equipe te chame no WhatsApp?`;
-}
-
-function buildCommercialReply(message: string, history: ChatMessage[], profile: LeadProfile) {
-  if (isQuestionOrChitChat(message)) {
-    return "";
-  }
-  const lastBotText = contextText(history, "", "bot");
-  const normalizedLastBot = normalizeText(lastBotText);
-  const botOfferedQuote =
-    normalizedLastBot.includes("orcamento") ||
-    /or.{0,3}amento/.test(normalizedLastBot) ||
-    normalizedLastBot.includes("salvar seu atendimento") ||
-    normalizedLastBot.includes("equipe retornar") ||
-    normalizedLastBot.includes("proximo passo");
-  const model = extractProductModel(message) || profile.product;
-  const enoughToQuote = Boolean(
-    (profile.product || profile.category) && (profile.environment || profile.propertyType) && (profile.area || profile.style)
-  );
-
-  if (profile.name && profile.phone && /whatsapp|telefone|celular|meu nome|nome|cidade|moro|sou de/i.test(message)) {
-    return buildContactRequest(profile);
-  }
-
-  if ((hasQuoteIntent(message) || (isYesIntent(message) && (botOfferedQuote || enoughToQuote))) && (!profile.name || !profile.phone || !profile.city)) {
-    return buildContactRequest(profile);
-  }
-
-  if (hasPositiveChoiceIntent(message) && model) {
-    if (!profile.environment) {
-      return `${model} \u00e9 uma boa escolha. Para eu te orientar melhor, ele seria para qual ambiente: sala, quarto, cozinha ou outro espa\u00e7o?`;
-    }
-    if (!profile.area) {
-      return `Boa escolha. Para ${profile.environment}, o ${model} pode funcionar muito bem. Qual a metragem aproximada para eu te orientar com mais seguran\u00e7a?`;
-    }
-    return `Boa escolha, o ${model} combina bem com ${profile.environment} de ${profile.area}. Quer ver mais fotos dessa linha no portf\u00f3lio ou prefere que eu monte um or\u00e7amento inicial?`;
-  }
-
-  if (enoughToQuote && !botOfferedQuote && !isPhotoIntent(message)) {
-    const item = compactProductLabel(profile);
-    const details = [profile.environment, profile.area, profile.style ? `estilo ${profile.style}` : ""].filter(Boolean).join(", ");
-    return details
-      ? `Excelente. Para ${details}, j\u00e1 consigo separar op\u00e7\u00f5es mais alinhadas para voc\u00ea.`
-      : `Excelente. Com o que voc\u00ea me passou${item ? ` sobre ${item}` : ""}, j\u00e1 consigo separar op\u00e7\u00f5es mais alinhadas para voc\u00ea.`;
-  }
-
-  return "";
-}
-
-
 function replyAlreadyAsks(text: string) {
   const normalized = normalizeText(text);
   return /\?\s*$/.test(text.trim()) ||
@@ -482,26 +384,26 @@ function buildEngagementFollowUp(reply: string, profile: LeadProfile, mediaCount
   if (!reply || replyAlreadyAsks(reply)) return "";
 
   if (mediaCount > 0) {
-    return "Alguma dessas op\u00e7\u00f5es te agradou? Se quiser, eu tamb\u00e9m posso separar por ambiente ou montar um or\u00e7amento inicial.";
+    return "Alguma dessas opções te agradou? Se quiser, eu também posso separar por ambiente ou montar um orçamento inicial.";
   }
 
   if (profile.name && profile.phone) {
-    return "Quer que eu encaminhe essas informa\u00e7\u00f5es para a equipe te chamar no WhatsApp, ou prefere ver mais algumas op\u00e7\u00f5es antes?";
+    return "Quer que eu encaminhe essas informações para a equipe te chamar no WhatsApp, ou prefere ver mais algumas opções antes?";
   }
 
   if (profile.category && profile.environment && (profile.area || profile.style)) {
-    return "Quer dar uma olhada nas fotos do portf\u00f3lio nessa linha ou prefere que eu j\u00e1 encaminhe um or\u00e7amento inicial?";
+    return "Quer dar uma olhada nas fotos do portfólio nessa linha ou prefere que eu já encaminhe um orçamento inicial?";
   }
 
   if (profile.category && profile.environment) {
-    return "Quer que eu te mostre fotos do portf\u00f3lio para esse ambiente, ou prefere seguir escolhendo por estilo?";
+    return "Quer que eu te mostre fotos do portfólio para esse ambiente, ou prefere seguir escolhendo por estilo?";
   }
 
   if (profile.category) {
-    return "Quer ver nosso portf\u00f3lio dessa categoria ou prefere me dizer primeiro o ambiente?";
+    return "Quer ver nosso portfólio dessa categoria ou prefere me dizer primeiro o ambiente?";
   }
 
-  return "Quer dar uma olhada no nosso portf\u00f3lio ou ver fotos de algum produto espec\u00edfico?";
+  return "Quer dar uma olhada no nosso portfólio ou ver fotos de algum produto específico?";
 }
 
 function parseCatalogEntries(lines: string[]) {
@@ -528,113 +430,6 @@ function buildMediaFromCatalog(entries: CatalogEntry[]): ChatMedia[] {
       };
     })
     .filter((item): item is ChatMedia => Boolean(item));
-}
-
-function hasCategoryMention(text: string) {
-  const normalized = normalizeText(text);
-  return (
-    normalized.includes("piso") ||
-    normalized.includes("vinil") ||
-    normalized.includes("rodape") ||
-    normalized.includes("telha") ||
-    normalized.includes("shingle") ||
-    normalized.includes("ripado") ||
-    normalized.includes("wpc") ||
-    normalized.includes("veneza") ||
-    normalized.includes("verona") ||
-    normalized.includes("florenca") ||
-    normalized.includes("londres") ||
-    normalized.includes("rio de janeiro") ||
-    normalized.includes("washington")
-  );
-}
-
-function isPhotoFollowUpSelection(history: ChatMessage[], message: string) {
-  if (hasPositiveChoiceIntent(message) || hasQuoteIntent(message)) return false;
-  if (!hasCategoryMention(message) || history.length === 0) return false;
-
-  const recentBotText = history
-    .filter((h) => h.role === "bot")
-    .slice(-4)
-    .map((h) => h.text)
-    .join(" ");
-  const recentUserText = history
-    .filter((h) => h.role === "user")
-    .slice(-4)
-    .map((h) => h.text)
-    .join(" ");
-  const normalizedBot = normalizeText(recentBotText);
-
-  return (
-    normalizedBot.includes("qual produto voce quer ver primeiro") ||
-    normalizedBot.includes("tenho fotos de pisos") ||
-    normalizedBot.includes("separo por categoria") ||
-    isPhotoIntent(recentUserText)
-  );
-}
-
-function pickCatalogByIntent(message: string, catalog: CatalogEntry[]) {
-  const normalized = normalizeText(message);
-  const models = ["veneza", "verona", "florenca", "londres", "rio de janeiro", "washington"];
-  const wantsPortfolio = /portfolio|portifolio|catalogo|inspiracao|inspirar/.test(normalized);
-
-  const matchedModel = models.find((m) => normalized.includes(m));
-  if (matchedModel) {
-    const selected = catalog.filter((c) => normalizeText(c.label).includes(matchedModel));
-    if (selected.length) {
-      return { reply: `Perfeito! Separei as fotos da linha ${matchedModel}.`, selected };
-    }
-  }
-
-  const category = detectCategory(message);
-  if (!category) {
-    if (wantsPortfolio) {
-      const selected = catalog
-        .filter((item) => {
-          const label = normalizeText(item.label);
-          return models.some((m) => label.includes(m)) || label.includes("rodape");
-        })
-        .slice(0, 6);
-
-      return {
-        reply:
-          selected.length > 0
-            ? "Claro. Separei um recorte visual do portfólio para você folhear primeiro. Depois me diga qual ambiente você quer renovar."
-            : "Claro. Posso te guiar pelo portfólio; hoje temos pisos, rodapés, telhas shingle e ripados. Qual ambiente você quer renovar?",
-        selected,
-      };
-    }
-
-    return {
-      reply: "Tenho fotos de pisos, rodapés, telhas shingle e ripados. Qual produto você quer ver primeiro?",
-      selected: [],
-    };
-  }
-
-  const selected: CatalogEntry[] = [];
-  const label = (item: CatalogEntry) => normalizeText(item.label);
-
-  for (const item of catalog) {
-    const n = label(item);
-    if (category === "rodapes" && n.includes("rodape")) selected.push(item);
-    if (category === "pisos" && models.some((m) => n.includes(m))) selected.push(item);
-    if (category === "telhas" && (n.includes("telha") || n.includes("shingle") || n.includes("portfolio"))) {
-      selected.push(item);
-    }
-    if (category === "ripados" && (n.includes("ripado") || n.includes("wpc") || n.includes("portfolio"))) {
-      selected.push(item);
-    }
-  }
-
-  const dedup = selected.filter((item, idx) => selected.findIndex((x) => x.url === item.url) === idx).slice(0, 6);
-  if (!dedup.length) {
-    return {
-      reply: "Não encontrei fotos dessa categoria no Drive agora. Posso te orientar por outra linha semelhante.",
-      selected: [],
-    };
-  }
-
-  return { reply: "Perfeito! Separei as fotos do produto que você pediu.", selected: dedup };
 }
 
 async function fetchRagContext(message: string, customerContext?: string) {
@@ -680,154 +475,6 @@ async function fetchRagContext(message: string, customerContext?: string) {
   }
 }
 
-function contextFromHistory(history: ChatMessage[]) {
-  const userTexts = history
-    .filter((m) => m.role === "user")
-    .slice(-8)
-    .map((m) => m.text);
-  const lastUserText = userTexts.join(" ");
-  const lastBotText = history
-    .filter((m) => m.role === "bot")
-    .slice(-3)
-    .map((m) => m.text)
-    .join(" ");
-  const latestFromUserHistory = (extractor: (text: string) => string) =>
-    [...userTexts].reverse().map(extractor).find(Boolean) || "";
-  const environments = extractEnvironments(lastUserText);
-
-  return {
-    category: detectCategory(lastUserText),
-    environment: latestFromUserHistory(extractEnvironment) || environments[0] || "",
-    environments,
-    propertyType: latestFromUserHistory(extractPropertyType) || extractPropertyType(lastUserText),
-    area: latestFromUserHistory(extractArea) || extractArea(lastUserText),
-    areaBand: latestFromUserHistory(extractAreaBand) || extractAreaBand(lastUserText),
-    style: latestFromUserHistory(extractStyle) || extractStyle(lastUserText),
-    botAskedArea: /metragem|m\u00b2|m2/.test(normalizeText(lastBotText)),
-    botEnvironment: extractEnvironment(lastBotText),
-    greeted: history.some(
-      (m) => m.role === "bot" && normalizeText(m.text).includes("sou o consultor casaboni")
-    ),
-  };
-}
-
-function buildGuidedReply(message: string, history: ChatMessage[]) {
-  if (isQuestionOrChitChat(message)) {
-    return null;
-  }
-  const historyCtx = contextFromHistory(history);
-  const category = detectCategory(message) || historyCtx.category;
-  const environment = extractEnvironment(message) || historyCtx.environment || historyCtx.botEnvironment;
-  const propertyType = extractPropertyType(message) || historyCtx.propertyType;
-  const area = extractArea(message) || historyCtx.area;
-  const areaBand = extractAreaBand(message) || historyCtx.areaBand;
-  const style = extractStyle(message) || historyCtx.style;
-  const currentEnvironments = extractEnvironments(message);
-  const environments = currentEnvironments.length ? currentEnvironments : historyCtx.environments;
-  const areaNumber = parseAreaNumber(area);
-  const likelyAreaTypingMistake =
-    !!area &&
-    areaNumber > 0 &&
-    areaNumber < 10 &&
-    /(sala|quarto|cozinha|comercial|apartamento|casa)/.test(normalizeText(environment || message));
-
-  if (isGreeting(message)) {
-    if (historyCtx.greeted) {
-      if (!category) return "Perfeito. Para eu te atender melhor, você quer ver pisos, rodapés, telhas ou ripados?";
-      if (!environment) return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
-      if (!area) return "Sem problema se você não tiver a metragem exata. Podemos seguir por faixa: pequeno, médio ou grande.";
-      return "Perfeito. Me diga o próximo detalhe que você quer analisar e eu te ajudo a decidir.";
-    }
-    return "Olá! Sou o Consultor Casaboni. Estou aqui para te atender e te ajudar a escolher a melhor solução para seu ambiente. Qual espaço você quer transformar hoje?";
-  }
-
-  if (hasFrustrationIntent(message)) {
-    const known = [category, environment, area, style].filter(Boolean).join(", ");
-    return known
-      ? `Voc\u00ea tem raz\u00e3o, eu me perdi no contexto. J\u00e1 tenho aqui: ${known}. Vamos seguir de forma simples: quer que eu te mostre um recorte visual do portf\u00f3lio ou prefere que eu indique 2 op\u00e7\u00f5es mais seguras?`
-      : "Voc\u00ea tem raz\u00e3o, eu me perdi. Vamos recome\u00e7ar de forma simples: \u00e9 para casa ou apartamento, e qual ambiente voc\u00ea quer transformar primeiro?";
-  }
-
-  if (currentEnvironments.length > 1 && category && !extractArea(message)) {
-    return `Perfeito, vamos organizar por partes para n\u00e3o misturar a indica\u00e7\u00e3o. Come\u00e7amos por ${currentEnvironments[0]} ou ${currentEnvironments[1]}? Depois eu te ajudo a manter harmonia entre os ambientes.`;
-  }
-
-  if (isPriceIntent(message) && !category) {
-    return "Consigo te orientar com orçamento, sim. Primeiro me diga a categoria: pisos, rodapés, telhas ou ripados.";
-  }
-
-  if (hasExplorationIntent(message) && environment && !category) {
-    return `Essa dúvida é normal. Para ${environment}, a gente pode começar pelo que mais muda a sensação do ambiente: piso, rodapé, ripado ou telha. Quer folhear um recorte do portfólio para comparar estilos antes de decidir?`;
-  }
-
-  if (hasExplorationIntent(message) && !category) {
-    return "Super normal ter essa dúvida, e eu te ajudo sem pressa. Se quiser, eu te mostro um resumo visual do portfólio primeiro; antes disso, me diz: é casa ou apartamento?";
-  }
-
-  if (hasExplorationIntent(message) && category && environment && area) {
-    const productLabel = category === "pisos" ? "piso" : category;
-    return `Sem problema, escolher ${productLabel} costuma gerar dúvida mesmo. Para ${environment} com ${area}, eu começaria comparando 2 ou 3 estilos: claro, amadeirado e moderno. Quer que eu te mostre um recorte visual do portfólio para você sentir qual combina mais?`;
-  }
-
-  if (hasExplorationIntent(message) && category && environment) {
-    return `Sem problema, eu te ajudo a escolher com calma. Para ${environment}, primeiro vale pensar no efeito que você quer: mais aconchegante, mais claro ou mais moderno. Quer folhear algumas opções do portfólio para sentir o estilo?`;
-  }
-
-  if (propertyType && !category && !environment) {
-    return `Perfeito, ${propertyType}. Qual ambiente você mais usa no dia a dia e quer renovar primeiro? Se preferir, também te mostro um recorte do portfólio para inspirar.`;
-  }
-
-  if (hasUnknownAreaIntent(message) && (historyCtx.botAskedArea || (category && environment && !area))) {
-    return "Sem problema. Podemos seguir sem medida exata: me diga se esse ambiente é pequeno, médio ou grande que eu já te indico opções certeiras.";
-  }
-
-  if (!category && environment && !area) {
-    return `Perfeito, ${environment}. Para eu te indicar com precisão, você quer pisos, rodapés, telhas shingle ou ripados?`;
-  }
-
-  if (area && environment && !category) {
-    return `Perfeito, ${environment} com ${area}. Para eu te indicar com precisão, você quer pisos, rodapés, telhas shingle ou ripados?`;
-  }
-
-  if (area && !environment && category) {
-    return `Perfeito, já anotei ${area}. Para ${category}, qual ambiente você quer transformar?`;
-  }
-
-  if (category && !environment) return `Perfeito. Para ${category}, qual ambiente você quer transformar?`;
-  if (category && environment && !area) {
-    if (areaBand) {
-      const bandLabel = areaBand === "medio" ? "médio" : areaBand;
-      if (!style) {
-        return `Perfeito, ${environment} de porte ${bandLabel}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
-      }
-      return `Excelente. Para ${environment} de porte ${bandLabel} e estilo ${style}, já consigo separar opções mais alinhadas para você.`;
-    }
-    if (hasUnknownAreaIntent(message)) {
-      return "Sem problema. Podemos começar sem metragem exata. Me diga se o ambiente é pequeno, médio ou grande que eu já te indico opções mais assertivas.";
-    }
-    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
-  }
-  if (category && environment && area) {
-    if (likelyAreaTypingMistake) {
-      return `Perfeito, ${environment}. Só confirmando para eu não errar na indicação: são ${area} mesmo ou seria ${areaNumber}0m²?`;
-    }
-    if (!style) {
-      return `Perfeito, ${environment} com ${area}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
-    }
-    return `Ótimo, ${environment}. Qual a metragem aproximada em m² para eu te orientar com mais precisão?`;
-  }
-  if (category && environment && area) {
-    if (likelyAreaTypingMistake) {
-      return `Perfeito, ${environment}. Só confirmando para eu não errar na indicação: são ${area} mesmo ou seria ${areaNumber}0m²?`;
-    }
-    if (!style) {
-      return `Perfeito, ${environment} com ${area}. Você prefere um visual mais claro, amadeirado, moderno ou rústico?`;
-    }
-    return `Excelente. Para ${environment} com ${area} e estilo ${style}, já consigo separar opções mais alinhadas para você.`;
-  }
-
-  return null;
-}
 function sanitizeReply(text: string) {
   const clean = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
   if (!clean) return "Pode repetir, por favor?";
@@ -838,21 +485,27 @@ function getFunctionDeclarations() {
   return [
     {
       name: "saveLead",
-      description: "Salva dados de um cliente interessado. Chame apenas quando tiver nome e telefone.",
+      description: "Salva ou atualiza os dados de qualificação e contato do lead no Firestore e CRM. Chame silenciosamente assim que o cliente fornecer novas informações.",
       parameters: {
         type: Type.OBJECT,
         properties: {
           name: { type: Type.STRING, description: "Nome do cliente" },
           phone: { type: Type.STRING, description: "Telefone ou WhatsApp" },
-          environment: { type: Type.STRING, description: "Tipo de ambiente" },
-          area: { type: Type.STRING, description: "Area em m2" },
+          email: { type: Type.STRING, description: "E-mail do cliente" },
+          city: { type: Type.STRING, description: "Cidade" },
+          category: { type: Type.STRING, description: "Categoria de interesse (ex: 'pisos', 'rodapes', 'telhas', 'ripados')" },
+          environment: { type: Type.STRING, description: "Ambiente (ex: 'Sala', 'Quarto')" },
+          area: { type: Type.STRING, description: "Metragem (ex: '45m2')" },
+          style: { type: Type.STRING, description: "Estilo preferido (ex: 'amadeirado', 'claro')" },
+          product: { type: Type.STRING, description: "Modelo específico de produto (ex: 'Verona', 'Veneza')" },
+          propertyType: { type: Type.STRING, description: "Tipo de imóvel (ex: 'casa', 'apartamento')" },
         },
         required: ["name", "phone"],
       },
     },
     {
       name: "scheduleMeeting",
-      description: "Agenda consultoria tecnica. Chame quando houver nome, email, data e horario.",
+      description: "Agenda consultoria técnica por videoconferência com nossos engenheiros ou arquitetos. Chame quando o cliente aceitar o agendamento.",
       parameters: {
         type: Type.OBJECT,
         properties: {
@@ -860,10 +513,21 @@ function getFunctionDeclarations() {
           email: { type: Type.STRING, description: "Email do cliente" },
           phone: { type: Type.STRING, description: "Telefone" },
           date: { type: Type.STRING, description: "Data no formato YYYY-MM-DD" },
-          time: { type: Type.STRING, description: "Horario no formato HH:MM" },
-          topic: { type: Type.STRING, description: "Assunto da reuniao" },
+          time: { type: Type.STRING, description: "Horário no formato HH:MM" },
+          topic: { type: Type.STRING, description: "Assunto da reunião" },
         },
         required: ["name", "email", "date", "time"],
+      },
+    },
+    {
+      name: "searchDriveFiles",
+      description: "Pesquisa arquivos de portfólio, fotos de ambientes reais instalados, catálogos em PDF, fichas técnicas e documentos na pasta do Drive da Casaboni.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          query: { type: Type.STRING, description: "Termo de busca (ex: 'fotos Verona', 'telha shingle cinza', 'catálogo rodapés')" },
+        },
+        required: ["query"],
       },
     },
   ];
@@ -891,6 +555,7 @@ function cleanLeadPayload(args: LeadProfile & { source?: string; status?: string
 async function saveLead(args: LeadProfile & { source?: string; status?: string }) {
   const payload = cleanLeadPayload(args);
   const adminDb = getAdminDb();
+  let dbResult = "";
 
   if (adminDb) {
     if (payload.sessionId) {
@@ -900,32 +565,54 @@ async function saveLead(args: LeadProfile & { source?: string; status?: string }
           ...payload,
           updatedAt: new Date(),
         });
-        return `Lead atualizado com sucesso (id: ${existing.docs[0].id}).`;
+        dbResult = `Lead atualizado com sucesso (id: ${existing.docs[0].id}).`;
       }
     }
 
-    const ref = await adminDb.collection("leads").add({
+    if (!dbResult) {
+      const ref = await adminDb.collection("leads").add({
+        ...payload,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      dbResult = `Lead salvo com sucesso (id: ${ref.id}).`;
+    }
+  } else if (db) {
+    const ref = await addDoc(collection(db, "leads"), {
       ...payload,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
-    return `Lead salvo com sucesso (id: ${ref.id}).`;
+    dbResult = `Lead salvo com sucesso (id: ${ref.id}).`;
+  } else {
+    dbResult = "Lead processado temporariamente.";
   }
 
-  if (!db) return "Erro: Banco de dados não inicializado.";
+  const crmWebhook = process.env.N8N_CRM_WEBHOOK_URL || (process.env.N8N_RAG_WEBHOOK_URL ? process.env.N8N_RAG_WEBHOOK_URL.replace("casaboni-rag-query", "casaboni-crm-lead") : "");
+  if (crmWebhook) {
+    try {
+      await fetch(crmWebhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "saveLead",
+          lead: payload,
+          timestamp: new Date().toISOString()
+        })
+      });
+      dbResult += " Pushed directly to CRM webhook.";
+    } catch (error) {
+      console.error("CRM Webhook sync failed:", error);
+    }
+  }
 
-  // Public Firestore rules allow lead creation, but not public reads.
-  // Without Admin credentials, create directly instead of querying by session.
-  const ref = await addDoc(collection(db, "leads"), {
-    ...payload,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  return `Lead salvo com sucesso (id: ${ref.id}).`;
+  return dbResult;
 }
 
 async function scheduleMeeting(args: { name: string; email: string; phone?: string; date: string; time: string; topic?: string }) {
   const adminDb = getAdminDb();
+  let dbResult = "";
+
   if (adminDb) {
     const ref = await adminDb.collection("meetings").add({
       customerName: args.name,
@@ -939,22 +626,50 @@ async function scheduleMeeting(args: { name: string; email: string; phone?: stri
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    return `Reunião agendada com sucesso (id: ${ref.id}).`;
+    dbResult = `Reunião agendada com sucesso (id: ${ref.id}).`;
+  } else if (db) {
+    const ref = await addDoc(collection(db, "meetings"), {
+      customerName: args.name,
+      customerEmail: args.email,
+      phone: args.phone || "",
+      date: args.date,
+      time: args.time,
+      topic: args.topic || "Consultoria Técnica",
+      status: "Agendada",
+      source: "chat-agent-api",
+      createdAt: serverTimestamp(),
+    });
+    dbResult = `Reunião agendada com sucesso (id: ${ref.id}).`;
+  } else {
+    dbResult = "Agendamento registrado temporariamente.";
   }
 
-  if (!db) return "Erro: Banco de dados não inicializado.";
-  const ref = await addDoc(collection(db, "meetings"), {
-    customerName: args.name,
-    customerEmail: args.email,
-    phone: args.phone || "",
-    date: args.date,
-    time: args.time,
-    topic: args.topic || "Consultoria Técnica",
-    status: "Agendada",
-    source: "chat-agent-api",
-    createdAt: serverTimestamp(),
-  });
-  return `Reunião agendada com sucesso (id: ${ref.id}).`;
+  const crmWebhook = process.env.N8N_CRM_WEBHOOK_URL || (process.env.N8N_RAG_WEBHOOK_URL ? process.env.N8N_RAG_WEBHOOK_URL.replace("casaboni-rag-query", "casaboni-crm-lead") : "");
+  if (crmWebhook) {
+    try {
+      await fetch(crmWebhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "scheduleMeeting",
+          meeting: {
+            name: args.name,
+            email: args.email,
+            phone: args.phone || "",
+            date: args.date,
+            time: args.time,
+            topic: args.topic || "Consultoria Técnica",
+          },
+          timestamp: new Date().toISOString()
+        })
+      });
+      dbResult += " Pushed directly to CRM webhook.";
+    } catch (error) {
+      console.error("CRM Webhook sync for meeting failed:", error);
+    }
+  }
+
+  return dbResult;
 }
 
 export default async function handler(req: any, res: any) {
@@ -974,118 +689,25 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const n8nResult = await chatWithN8nSdr({ message, history, customerContext, sessionId });
+    if (n8nResult) {
+      res.status(200).json({ ...n8nResult, ok: true });
+      return;
+    }
+
     const leadProfile = buildLeadProfile(history, message, sessionId);
-
-    const rag = await fetchRagContext(message, customerContext);
-    const catalog = parseCatalogEntries(rag.driveCatalog);
-    const photoFlow = isPhotoIntent(message) || isPhotoFollowUpSelection(history, message);
-
-    if (photoFlow) {
-      const picked = pickCatalogByIntent(message, catalog);
-      const media = buildMediaFromCatalog(picked.selected);
-      res.status(200).json({
-        ok: true,
-        reply: picked.reply,
-        media,
-        followUp: buildEngagementFollowUp(picked.reply, leadProfile, media.length),
-        source: "photo-flow",
-      });
-      return;
-    }
-
-    const maybeName = extractName(message);
-    const maybePhone = extractPhone(message);
-    const maybeEmail = extractEmail(message);
-    const maybeDate = extractDate(message);
-    const maybeTime = extractTime(message);
-
-    if (hasMeetingIntent(message) && maybeName && maybeEmail && maybeDate && maybeTime) {
-      try {
-        await scheduleMeeting({ name: maybeName, email: maybeEmail, phone: maybePhone, date: maybeDate, time: maybeTime });
-      } catch {}
-      res.status(200).json({
-        ok: true,
-        reply: `Perfeito, ${maybeName}. Reunião agendada para ${maybeDate} às ${maybeTime}. Se quiser, já me diga o ambiente e a metragem para adiantarmos a consultoria.`,
-        media: [],
-      });
-      return;
-    }
-
-    if (hasMeetingIntent(message) && (!maybeName || !maybeEmail || !maybeDate || !maybeTime)) {
-      const missing: string[] = [];
-      if (!maybeName) missing.push("nome");
-      if (!maybeEmail) missing.push("email");
-      if (!maybeDate) missing.push("data (YYYY-MM-DD)");
-      if (!maybeTime) missing.push("horário (HH:MM)");
-      res.status(200).json({ ok: true, reply: `Perfeito, eu agendo para você. Me confirme: ${missing.join(", ")}.`, media: [] });
-      return;
-    }
-
-    if ((hasLeadIntent(message) || maybePhone) && maybeName && maybePhone) {
-      let leadSaved = false;
-      try {
-        await saveLead({
-          ...leadProfile,
-          name: maybeName,
-          phone: maybePhone,
-          environment: leadProfile.environment || extractEnvironment(message),
-          area: leadProfile.area || extractArea(message),
-        });
-        leadSaved = true;
-      } catch (error) {
-        console.error("Lead save error:", error);
-      }
-      res.status(200).json({
-        ok: true,
-        reply: leadProfile.city
-          ? `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. Quer que eu encaminhe o pr\u00f3ximo passo de or\u00e7amento pelo WhatsApp?`
-          : `Perfeito, ${maybeName}. Seus dados j\u00e1 foram cadastrados. De qual cidade voc\u00ea fala? Assim eu direciono melhor disponibilidade e pr\u00f3ximo passo.`,
-        media: [],
-        source: "lead-flow",
-        leadSaved,
-      });
-      return;
-    }
-
-    if ((hasLeadIntent(message) || maybePhone) && (!maybeName || !maybePhone)) {
-      const missingLead = !maybeName ? "nome completo" : "telefone/WhatsApp";
-      res.status(200).json({ ok: true, reply: `Perfeito, posso cadastrar seu contato. Me informe seu ${missingLead}.`, media: [], source: "lead-flow" });
-      return;
-    }
 
     if (leadProfile.name && leadProfile.phone) {
       try {
         await saveLead(leadProfile);
-      } catch {}
-    }
-
-    const commercial = buildCommercialReply(message, history, leadProfile);
-    if (commercial) {
-      res.status(200).json({
-        ok: true,
-        reply: commercial,
-        media: [],
-        followUp: buildEngagementFollowUp(commercial, leadProfile),
-        source: "commercial-flow",
-      });
-      return;
-    }
-
-    const guided = buildGuidedReply(message, history);
-    if (guided) {
-      res.status(200).json({
-        ok: true,
-        reply: guided,
-        media: [],
-        followUp: buildEngagementFollowUp(guided, leadProfile),
-        source: "guided-flow",
-      });
-      return;
+      } catch (err) {
+        console.error("Silent lead save error:", err);
+      }
     }
 
     const key = (process.env.GEMINI_API_KEY || "").trim();
     if (!key) {
-      const reply = "Sou o Consultor Casaboni e estou aqui para te atender. Me diga o ambiente, metragem aproximada e categoria desejada para eu te orientar melhor.";
+      const reply = "Olá! Sou o Consultor Casaboni. Estou aqui para te ajudar a escolher os melhores acabamentos para a sua obra. Como posso te ajudar hoje?";
       res.status(200).json({
         ok: true,
         reply,
@@ -1095,6 +717,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const rag = await fetchRagContext(message, customerContext);
     const ai = new GoogleGenAI({ apiKey: key });
     const chat = ai.chats.create({
       model: (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim(),
@@ -1103,7 +726,6 @@ export default async function handler(req: any, res: any) {
         maxOutputTokens: 2048,
         systemInstruction:
           BASE_SYSTEM_INSTRUCTION +
-          "\n\nRegras de resposta obrigatórias: nunca inventar produto/preço/prazo, manter continuidade com histórico e fazer apenas 1 pergunta por vez quando faltar contexto." +
           (rag.ragPromptContext
             ? `\n\nContexto RAG do Drive:\n${rag.ragPromptContext}`
             : ""),
@@ -1119,8 +741,10 @@ export default async function handler(req: any, res: any) {
       .filter(Boolean)
       .join("\n\n");
 
+    const mediaAccumulator: ChatMedia[] = [];
     let response = await chat.sendMessage({ message: conversation });
     let turnLimit = 3;
+
     while (response.functionCalls && response.functionCalls.length > 0 && turnLimit > 0) {
       turnLimit -= 1;
       const toolResults: string[] = [];
@@ -1128,9 +752,30 @@ export default async function handler(req: any, res: any) {
       for (const call of response.functionCalls) {
         try {
           if (call.name === "saveLead") {
-            toolResults.push(await saveLead(call.args as any));
+            const args = call.args as any;
+            args.sessionId = sessionId;
+            Object.assign(leadProfile, args);
+            const resultStr = await saveLead(args);
+            toolResults.push(resultStr);
           } else if (call.name === "scheduleMeeting") {
-            toolResults.push(await scheduleMeeting(call.args as any));
+            const resultStr = await scheduleMeeting(call.args as any);
+            toolResults.push(resultStr);
+          } else if (call.name === "searchDriveFiles") {
+            const args = call.args as any;
+            const queryText = args.query || "";
+            const searchRag = await fetchRagContext(queryText, customerContext);
+            const parsedCatalog = parseCatalogEntries(searchRag.driveCatalog);
+            
+            const builtMedia = buildMediaFromCatalog(parsedCatalog);
+            if (builtMedia && builtMedia.length > 0) {
+              mediaAccumulator.push(...builtMedia);
+            }
+
+            const textResponse = parsedCatalog.length > 0
+              ? `Arquivos encontrados na pasta do Drive:\n` + parsedCatalog.map((c, i) => `${i+1}. ${c.label} - Link: ${c.url}`).join("\n")
+              : `Nenhum arquivo ou foto encontrado no Drive para a busca "${queryText}".`;
+            
+            toolResults.push(textResponse);
           } else {
             toolResults.push(`Função não suportada: ${call.name}`);
           }
@@ -1147,24 +792,22 @@ export default async function handler(req: any, res: any) {
     }
 
     const aiReply = sanitizeReply(response.text || "Pode repetir, por favor?");
+    const uniqueMedia = mediaAccumulator.filter(
+      (item, idx) => mediaAccumulator.findIndex((x) => x.sourceUrl === item.sourceUrl) === idx
+    );
+
     res.status(200).json({
       ok: true,
       reply: aiReply,
-      media: [],
-      followUp: buildEngagementFollowUp(aiReply, leadProfile),
+      media: uniqueMedia,
+      followUp: buildEngagementFollowUp(aiReply, leadProfile, uniqueMedia.length),
       source: "gemini",
     });
-  } catch {
-    const message = String(req.body?.message || "").trim();
-    const exploratoryFallback = hasExplorationIntent(message);
-    const fallbackReply = message
-      ? exploratoryFallback
-        ? "Perfeito, eu te ajudo com calma. Se quiser, começamos com uma visão rápida do portfólio; me diz só se é casa ou apartamento."
-        : "Estou aqui para te atender e te ajudar a escolher o produto ideal. Qual ambiente você quer renovar primeiro?"
-      : "Posso te ajudar com pisos, rodapés, telhas e ripados. Como posso te atender?";
-
+  } catch (error) {
+    console.error("handler error:", error);
+    const fallbackReply = "Estou aqui para te atender e te ajudar a escolher o produto ideal. Como posso te ajudar hoje?";
     const fallbackHistory = Array.isArray(req.body?.history) ? (req.body.history as ChatMessage[]) : [];
-    const fallbackProfile = buildLeadProfile(fallbackHistory, message, String(req.body?.sessionId || ""));
+    const fallbackProfile = buildLeadProfile(fallbackHistory, String(req.body?.message || ""), String(req.body?.sessionId || ""));
     res.status(200).json({
       ok: true,
       reply: fallbackReply,

@@ -38,6 +38,13 @@ type ChatMedia = {
   thumbnailUrl: string;
 };
 
+type ChatInput = {
+  message: string;
+  history: ChatMessage[];
+  customerContext?: string;
+  sessionId?: string;
+};
+
 type LeadProfile = {
   name?: string;
   phone?: string;
@@ -365,6 +372,63 @@ export const firestoreDatabaseId =
 const hasFirebaseConfig = Boolean(firebaseConfig.projectId && firebaseConfig.apiKey && firebaseConfig.appId);
 const firebaseApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
 const db = firebaseApp ? getFirestore(firebaseApp, firestoreDatabaseId) : null;
+
+function getN8nSdrWebhookUrl() {
+  const explicit = (process.env.N8N_SDR_WEBHOOK_URL || "").trim();
+  if (explicit) return explicit;
+
+  const ragWebhook = (process.env.N8N_RAG_WEBHOOK_URL || "").trim();
+  if (ragWebhook.includes("/casaboni-rag-query")) {
+    return ragWebhook.replace("/casaboni-rag-query", "/casaboni-sdr-agent");
+  }
+
+  return "";
+}
+
+async function chatWithN8nSdr(input: ChatInput) {
+  const webhookUrl = getN8nSdrWebhookUrl();
+  if (!webhookUrl) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        message: input.message,
+        history: input.history,
+        customerContext: input.customerContext || "",
+        sessionId: input.sessionId || "",
+        geminiApiKey: (process.env.GEMINI_API_KEY || "").trim(),
+        geminiModel: (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim(),
+        ragWebhookUrl: (process.env.N8N_RAG_WEBHOOK_URL || "").trim(),
+        driveFolderId: (process.env.N8N_DRIVE_FOLDER_ID || "").trim(),
+        firebase: {
+          apiKey: firebaseConfig.apiKey,
+          projectId: firebaseConfig.projectId,
+          databaseId: firestoreDatabaseId,
+        },
+      }),
+    });
+
+    if (!response.ok) throw new Error(`n8n SDR HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data?.ok || !data?.reply) throw new Error("n8n SDR returned invalid response");
+    return {
+      ...data,
+      media: Array.isArray(data.media) ? data.media : [],
+      source: data.source || "n8n-sdr-agent",
+    };
+  } catch (error) {
+    console.error("n8n SDR webhook error:", error);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function requireDb() {
   if (!db) {
@@ -1079,6 +1143,9 @@ export async function chatWithGemini(input: {
   customerContext?: string;
   sessionId?: string;
 }) {
+  const n8nResult = await chatWithN8nSdr(input);
+  if (n8nResult) return n8nResult;
+
   const geminiApiKey = (process.env.GEMINI_API_KEY || "").trim();
 
   const ragContext = await fetchRagContext(input.message, input.customerContext);
