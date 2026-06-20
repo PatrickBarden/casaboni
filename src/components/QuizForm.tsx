@@ -7,7 +7,8 @@ import {
   Building,
   Building2,
   CalendarDays,
-  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Hammer,
   Home,
   MoreHorizontal,
@@ -19,12 +20,6 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 
 type FunnelStep = 1 | 2 | 3 | 4 | 5 | 6;
-
-type DateOption = {
-  iso: string;
-  label: string;
-  weekday: string;
-};
 
 type QuoteFunnelState = {
   projectType: string;
@@ -39,6 +34,22 @@ type QuoteFunnelState = {
 
 const TOTAL_STEPS = 6;
 const TIME_SLOTS = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+const TIME_ZONE = "America/Sao_Paulo";
+const MONTHS_PT = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+const WEEKDAY_LETTERS = ["D", "S", "T", "Q", "Q", "S", "S"];
 
 function toStep(value: number): FunnelStep {
   return Math.max(1, Math.min(TOTAL_STEPS, value)) as FunnelStep;
@@ -61,41 +72,46 @@ const modalityOptions = [
   { id: "video", label: "Videochamada", helper: "Mais contexto visual para orientar melhor", icon: Video },
 ];
 
-function buildAvailableDates(limit = 12): DateOption[] {
-  const formatterWeekday = new Intl.DateTimeFormat("pt-BR", {
-    weekday: "short",
-    timeZone: "America/Sao_Paulo",
-  });
-  const formatterLabel = new Intl.DateTimeFormat("pt-BR", {
+function getTodayInBrazil() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
     day: "2-digit",
-    month: "short",
-    timeZone: "America/Sao_Paulo",
-  });
-  const days: DateOption[] = [];
-  const cursor = new Date();
-  cursor.setHours(12, 0, 0, 0);
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value ?? "2000";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return new Date(`${year}-${month}-${day}T12:00:00`);
+}
 
-  while (days.length < limit) {
-    const weekdayNumber = cursor.getDay();
-    if (weekdayNumber !== 0) {
-      const weekday = formatterWeekday
-        .format(cursor)
-        .replace(".", "")
-        .replace(/^\w/, (char) => char.toUpperCase());
-      const label = formatterLabel
-        .format(cursor)
-        .replace(".", "")
-        .replace(/^\d{2}\s/, (match) => match.toUpperCase());
-      days.push({
-        iso: cursor.toISOString().slice(0, 10),
-        label,
-        weekday,
-      });
-    }
-    cursor.setDate(cursor.getDate() + 1);
+function toIsoDate(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isSameMonth(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
+}
+
+function buildMonthDays(viewMonth: Date) {
+  const monthStart = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1, 12);
+  const firstWeekday = monthStart.getDay();
+  const monthLength = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+  const cells: Array<Date | null> = [];
+
+  for (let index = 0; index < firstWeekday; index += 1) {
+    cells.push(null);
   }
 
-  return days;
+  for (let day = 1; day <= monthLength; day += 1) {
+    cells.push(new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day, 12));
+  }
+
+  return cells;
 }
 
 function areaTier(area: number) {
@@ -111,18 +127,39 @@ function formatSelectedDate(iso: string) {
     weekday: "short",
     day: "2-digit",
     month: "short",
-    timeZone: "America/Sao_Paulo",
+    timeZone: TIME_ZONE,
   })
     .format(new Date(`${iso}T12:00:00`))
     .replace(".", "")
     .replace(/^\w/, (char) => char.toUpperCase());
 }
 
+function getStepTitle(step: FunnelStep) {
+  if (step === 1) return "Vamos começar";
+  if (step === 2) return "Contexto do ambiente";
+  if (step === 3) return "Metragem aproximada";
+  if (step === 4) return "Modalidade do atendimento";
+  if (step === 5) return "Escolha dia e horário";
+  return "Confirme seus dados";
+}
+
+function getStepDescription(step: FunnelStep) {
+  if (step === 1) return "Seu projeto é uma reforma ou uma obra nova?";
+  if (step === 2) return "Que tipo de ambiente vamos atender?";
+  if (step === 3) return "Não precisa ser exato, é só para entendermos a escala do atendimento.";
+  if (step === 4) return "Escolha a forma mais confortável para conversar com a equipe.";
+  if (step === 5) return "Selecione o melhor dia e um horário disponível para o atendimento.";
+  return "Enviamos a confirmação e o retorno da equipe pelo WhatsApp.";
+}
+
 export default function QuizForm() {
   const navigate = useNavigate();
-  const dateOptions = useMemo(() => buildAvailableDates(12), []);
   const [step, setStep] = useState<FunnelStep>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewMonth, setViewMonth] = useState(() => {
+    const today = getTodayInBrazil();
+    return new Date(today.getFullYear(), today.getMonth(), 1, 12);
+  });
   const [formData, setFormData] = useState<QuoteFunnelState>({
     projectType: "",
     environmentType: "",
@@ -134,7 +171,11 @@ export default function QuizForm() {
     phone: "",
   });
 
+  const today = useMemo(() => getTodayInBrazil(), []);
+  const monthDays = useMemo(() => buildMonthDays(viewMonth), [viewMonth]);
   const selectedDateLabel = useMemo(() => formatSelectedDate(formData.date), [formData.date]);
+  const selectedMonthLabel = `${MONTHS_PT[viewMonth.getMonth()]} ${viewMonth.getFullYear()}`;
+  const canGoPreviousMonth = !isSameMonth(viewMonth, new Date(today.getFullYear(), today.getMonth(), 1, 12));
 
   const canAdvance =
     (step === 1 && Boolean(formData.projectType)) ||
@@ -165,6 +206,14 @@ export default function QuizForm() {
     window.setTimeout(() => {
       setStep((current) => toStep(current + 1));
     }, 180);
+  };
+
+  const selectDate = (date: Date) => {
+    setFormData((current) => ({
+      ...current,
+      date: toIsoDate(date),
+      time: "",
+    }));
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -235,100 +284,62 @@ export default function QuizForm() {
   };
 
   return (
-    <section className="relative overflow-hidden bg-primary py-16 md:py-24" id="contato">
+    <section className="relative overflow-hidden bg-primary px-4 py-16 md:px-6 md:py-24" id="contato">
       <div className="absolute inset-0 opacity-20">
-        <div className="absolute -left-24 top-20 h-64 w-64 rounded-full bg-action/30 blur-3xl" />
+        <div className="absolute left-[-4rem] top-20 h-64 w-64 rounded-full bg-action/20 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-white/10 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto grid max-w-7xl gap-10 px-5 md:grid-cols-[1.05fr_0.95fr] md:px-8">
-        <motion.div
-          initial={{ opacity: 0, x: -24 }}
-          whileInView={{ opacity: 1, x: 0 }}
-          viewport={{ once: true, margin: "-120px" }}
-          className="max-w-xl self-center"
-        >
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-200">
-            <CalendarDays className="h-4 w-4 text-action" />
-            Atendimento consultivo Casaboni
+      <motion.form
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-100px" }}
+        onSubmit={handleSubmit}
+        className="relative mx-auto max-w-2xl overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#fbfaf7] p-5 text-primary shadow-[0_32px_80px_rgba(0,0,0,0.28)] md:p-7"
+      >
+        <div className="mb-6 text-center">
+          <span className="inline-flex items-center gap-2 rounded-full border border-[#e5ddd2] bg-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.24em] text-action">
+            <CalendarDays className="h-4 w-4" />
+            Atendimento Casaboni
           </span>
 
-          <h2 className="mt-6 text-3xl font-light leading-tight text-white md:text-5xl">
-            Agende um atendimento com olhar comercial e técnico para acelerar sua decisão.
+          <h2 className="mt-5 text-[1.9rem] font-semibold leading-tight text-primary md:text-[2.15rem]">
+            Agende seu atendimento
           </h2>
 
-          <p className="mt-5 max-w-lg text-sm leading-7 text-zinc-300 md:text-base">
-            Seu cliente pediu algo mais direto e elegante, então trouxemos o orçamento para um funil
-            de agendamento premium. Em poucos passos ele escolhe formato, dia, horário e já entra no
-            radar da equipe com contexto suficiente para um atendimento melhor.
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-outline md:text-[15px]">
+            Fale com um consultor comercial no dia e horário que fizer mais sentido para você.
           </p>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            {[
-              "Atendimento com voz ou vídeo",
-              "Fluxo mais organizado para o comercial",
-              "Captação de lead com contexto real",
-              "Experiência mais convincente no mobile",
-            ].map((item) => (
-              <div
-                key={item}
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-zinc-100 backdrop-blur-sm"
-              >
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-action" />
-                  <span>{item}</span>
-                </div>
-              </div>
-            ))}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[11px] uppercase tracking-[0.18em] text-outline">
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-action" />
+              Atendimento no Rio Grande do Sul
+            </span>
+            <span className="hidden text-[#d2c8bb] md:inline">•</span>
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-action" />
+              Orientação personalizada
+            </span>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.form
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          onSubmit={handleSubmit}
-          className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(248,244,239,0.98)_100%)] p-5 shadow-[0_32px_80px_rgba(0,0,0,0.28)] md:p-8"
-        >
-          <div className="absolute inset-x-0 top-0 h-1.5 bg-zinc-200/60">
-            <div className="h-full rounded-full bg-action transition-all duration-300" style={{ width: `${progress}%` }} />
-          </div>
+        <div className="mb-7 h-1.5 overflow-hidden rounded-full bg-[#eee7dd]">
+          <div className="h-full rounded-full bg-action transition-all duration-300" style={{ width: `${progress}%` }} />
+        </div>
 
-          <div className="mb-8 pt-3">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.28em] text-action">
-                  Passo {step} de {TOTAL_STEPS}
-                </p>
-                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-primary">
-                  {step === 1 && "Vamos começar pelo projeto"}
-                  {step === 2 && "Entendendo o tipo de ambiente"}
-                  {step === 3 && "Escala aproximada do atendimento"}
-                  {step === 4 && "Como prefere conversar"}
-                  {step === 5 && "Escolha o melhor horário"}
-                  {step === 6 && "Confirmação do atendimento"}
-                </h3>
-              </div>
-              <div className="hidden rounded-2xl bg-white/70 px-4 py-3 text-right shadow-sm md:block">
-                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-outline">Resumo</p>
-                <p className="mt-1 text-sm font-semibold text-primary">
-                  {formData.modality || "Atendimento consultivo"}
-                </p>
-                <p className="text-xs text-outline">{selectedDateLabel && formData.time ? `${selectedDateLabel} • ${formData.time}` : "Defina seu horário"}</p>
-              </div>
-            </div>
-
-            <p className="mt-3 max-w-xl text-sm leading-6 text-outline">
-              {step === 1 && "Conte se estamos falando de uma renovação ou de um projeto novo para guiarmos a conversa do jeito certo."}
-              {step === 2 && "Isso ajuda a equipe a entender o contexto comercial e o perfil do atendimento."}
-              {step === 3 && "Não precisa ser exato. Essa faixa já ajuda a qualificar o atendimento sem travar a conversa."}
-              {step === 4 && "Deixe o formato mais confortável para o cliente e mais útil para a recomendação do consultor."}
-              {step === 5 && "Mantivemos uma seleção simples e elegante para acelerar a escolha no celular e no desktop."}
-              {step === 6 && "Com nome e WhatsApp, a equipe já consegue confirmar o atendimento e seguir a conversa sem ruído."}
+        <div className="min-h-[420px]">
+          <div className="mb-6">
+            <p className="text-[11px] font-bold uppercase tracking-[0.26em] text-action">
+              Passo {step} de {TOTAL_STEPS}
             </p>
+            <h3 className="mt-3 text-[1.45rem] font-semibold leading-tight text-primary md:text-[1.65rem]">
+              {getStepTitle(step)}
+            </h3>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-outline">{getStepDescription(step)}</p>
           </div>
 
-          <div className="min-h-[400px]">
+          <div>
             {step === 1 && (
               <div className="grid gap-4">
                 {projectOptions.map((option) => (
@@ -336,18 +347,18 @@ export default function QuizForm() {
                     key={option.id}
                     type="button"
                     onClick={() => pickAndAdvance("projectType", option.label)}
-                    className={`group flex items-center gap-4 rounded-[1.6rem] border px-5 py-5 text-left transition-all ${
+                    className={`group flex items-center gap-4 rounded-2xl border px-4 py-4 text-left transition-all ${
                       formData.projectType === option.label
-                        ? "border-action bg-action/10 shadow-[0_18px_40px_rgba(216,90,48,0.18)]"
-                        : "border-outline-variant bg-white/85 hover:border-action/60 hover:bg-white"
+                        ? "border-2 border-action bg-[#fdf2ec] shadow-[0_16px_32px_rgba(216,90,48,0.12)]"
+                        : "border-[#e3ddd2] bg-white hover:border-action/60"
                     }`}
                   >
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white">
-                      <option.icon className="h-6 w-6" />
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#fdf2ec] text-action">
+                      <option.icon className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-base font-semibold text-primary">{option.label}</p>
-                      <p className="mt-1 text-sm text-outline">{option.helper}</p>
+                      <p className="text-[15px] font-semibold text-primary">{option.label}</p>
+                      <p className="mt-1 text-xs leading-5 text-outline">{option.helper}</p>
                     </div>
                     <ArrowRight className="ml-auto h-5 w-5 text-action transition-transform group-hover:translate-x-1" />
                   </button>
@@ -362,28 +373,28 @@ export default function QuizForm() {
                     key={option.id}
                     type="button"
                     onClick={() => pickAndAdvance("environmentType", option.label)}
-                    className={`rounded-[1.5rem] border p-5 text-left transition-all ${
+                    className={`rounded-2xl border p-4 text-left transition-all ${
                       formData.environmentType === option.label
-                        ? "border-action bg-action/10 shadow-[0_16px_34px_rgba(216,90,48,0.16)]"
-                        : "border-outline-variant bg-white/85 hover:border-action/60 hover:bg-white"
+                        ? "border-2 border-action bg-[#fdf2ec] shadow-[0_16px_32px_rgba(216,90,48,0.12)]"
+                        : "border-[#e3ddd2] bg-white hover:border-action/60"
                     }`}
                   >
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-white">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#fdf2ec] text-action">
                       <option.icon className="h-5 w-5" />
                     </div>
-                    <p className="mt-4 text-base font-semibold text-primary">{option.label}</p>
-                    <p className="mt-1 text-sm leading-6 text-outline">{option.helper}</p>
+                    <p className="mt-4 text-[15px] font-semibold text-primary">{option.label}</p>
+                    <p className="mt-1 text-xs leading-5 text-outline">{option.helper}</p>
                   </button>
                 ))}
               </div>
             )}
 
             {step === 3 && (
-              <div className="rounded-[1.6rem] border border-outline-variant bg-white/85 p-5 md:p-6">
+              <div className="rounded-2xl border border-[#e3ddd2] bg-white p-5 md:p-6">
                 <div className="grid gap-5 md:grid-cols-[1fr_auto] md:items-end">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-action">Metragem aproximada</p>
-                    <div className="mt-3 flex items-center overflow-hidden rounded-2xl border border-outline-variant bg-surface-lowest">
+                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-action">Área estimada</p>
+                    <div className="mt-3 flex items-center overflow-hidden rounded-2xl border border-[#cfc7ba] bg-[#fbfaf7]">
                       <input
                         type="number"
                         min="10"
@@ -392,13 +403,13 @@ export default function QuizForm() {
                         onChange={(event) => updateField("area", Number(event.target.value) || 10)}
                         className="w-full bg-transparent px-5 py-4 text-3xl font-semibold text-primary outline-none"
                       />
-                      <span className="border-l border-outline-variant bg-surface px-5 py-4 text-sm font-semibold uppercase tracking-[0.2em] text-outline">
+                      <span className="border-l border-[#cfc7ba] bg-[#f1ece3] px-5 py-4 text-sm font-semibold uppercase tracking-[0.2em] text-outline">
                         m²
                       </span>
                     </div>
                   </div>
 
-                  <div className="rounded-2xl bg-action/10 px-4 py-3 text-sm font-semibold text-action">
+                  <div className="rounded-2xl bg-[#fdf2ec] px-4 py-3 text-sm font-semibold text-action">
                     {areaTier(formData.area)}
                   </div>
                 </div>
@@ -411,7 +422,7 @@ export default function QuizForm() {
                     step="5"
                     value={Math.min(300, formData.area)}
                     onChange={(event) => updateField("area", Number(event.target.value))}
-                    className="h-2 w-full cursor-pointer appearance-none rounded-full bg-surface-high accent-action"
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full bg-[#eee7dd] accent-action"
                   />
                   <div className="mt-3 flex justify-between text-[11px] font-bold uppercase tracking-[0.2em] text-outline">
                     <span>10 m²</span>
@@ -429,18 +440,18 @@ export default function QuizForm() {
                     key={option.id}
                     type="button"
                     onClick={() => pickAndAdvance("modality", option.label)}
-                    className={`group flex items-center gap-4 rounded-[1.6rem] border px-5 py-5 text-left transition-all ${
+                    className={`group flex items-center gap-4 rounded-2xl border px-4 py-4 text-left transition-all ${
                       formData.modality === option.label
-                        ? "border-action bg-action/10 shadow-[0_18px_40px_rgba(216,90,48,0.18)]"
-                        : "border-outline-variant bg-white/85 hover:border-action/60 hover:bg-white"
+                        ? "border-2 border-action bg-[#fdf2ec] shadow-[0_16px_32px_rgba(216,90,48,0.12)]"
+                        : "border-[#e3ddd2] bg-white hover:border-action/60"
                     }`}
                   >
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white">
-                      <option.icon className="h-6 w-6" />
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#fdf2ec] text-action">
+                      <option.icon className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-base font-semibold text-primary">{option.label}</p>
-                      <p className="mt-1 text-sm text-outline">{option.helper}</p>
+                      <p className="text-[15px] font-semibold text-primary">{option.label}</p>
+                      <p className="mt-1 text-xs leading-5 text-outline">{option.helper}</p>
                     </div>
                     <ArrowRight className="ml-auto h-5 w-5 text-action transition-transform group-hover:translate-x-1" />
                   </button>
@@ -450,32 +461,77 @@ export default function QuizForm() {
 
             {step === 5 && (
               <div className="grid gap-6">
-                <div className="rounded-[1.6rem] border border-outline-variant bg-white/85 p-5">
-                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-action">Datas disponíveis</p>
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    {dateOptions.map((option) => (
-                      <button
-                        key={option.iso}
-                        type="button"
-                        onClick={() => updateField("date", option.iso)}
-                        className={`rounded-2xl border px-4 py-4 text-left transition-all ${
-                          formData.date === option.iso
-                            ? "border-action bg-action/10 shadow-[0_14px_28px_rgba(216,90,48,0.14)]"
-                            : "border-outline-variant bg-surface-lowest hover:border-action/50"
-                        }`}
+                <div className="rounded-2xl border border-[#e3ddd2] bg-white p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1, 12))}
+                      disabled={!canGoPreviousMonth}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#e3ddd2] bg-[#fbfaf7] text-outline transition hover:border-action hover:text-action disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    <div className="text-center">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-action">Datas disponíveis</p>
+                      <p className="mt-1 text-sm font-semibold capitalize text-primary">{selectedMonthLabel}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1, 12))}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#e3ddd2] bg-[#fbfaf7] text-outline transition hover:border-action hover:text-action"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {WEEKDAY_LETTERS.map((label, index) => (
+                      <span
+                        key={`${label}-${index}`}
+                        className="py-1 text-center text-[11px] font-bold uppercase tracking-[0.18em] text-outline"
                       >
-                        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-outline">{option.weekday}</p>
-                        <p className="mt-1 text-base font-semibold text-primary">{option.label}</p>
-                      </button>
+                        {label}
+                      </span>
                     ))}
+
+                    {monthDays.map((day, index) => {
+                      if (!day) {
+                        return <span key={`empty-${index}`} className="aspect-square" />;
+                      }
+
+                      const isPast = day.getTime() < today.getTime();
+                      const isSunday = day.getDay() === 0;
+                      const iso = toIsoDate(day);
+                      const isSelected = formData.date === iso;
+                      const isDisabled = isPast || isSunday;
+
+                      return (
+                        <button
+                          key={iso}
+                          type="button"
+                          disabled={isDisabled}
+                          onClick={() => selectDate(day)}
+                          className={`aspect-square rounded-xl text-sm transition ${
+                            isSelected
+                              ? "bg-action font-semibold text-white"
+                              : "text-primary hover:bg-[#fdf2ec] disabled:cursor-default disabled:text-[#d6cdc2] disabled:hover:bg-transparent"
+                          }`}
+                        >
+                          {day.getDate()}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="rounded-[1.6rem] border border-outline-variant bg-white/85 p-5">
+                <div className="rounded-2xl border border-[#e3ddd2] bg-white p-5">
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-xs font-bold uppercase tracking-[0.24em] text-action">Horários sugeridos</p>
                     <span className="text-xs text-outline">{selectedDateLabel || "Escolha uma data"}</span>
                   </div>
+
                   <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {TIME_SLOTS.map((slot) => (
                       <button
@@ -483,10 +539,10 @@ export default function QuizForm() {
                         type="button"
                         disabled={!formData.date}
                         onClick={() => updateField("time", slot)}
-                        className={`rounded-2xl border px-3 py-3 text-sm font-semibold transition-all ${
+                        className={`rounded-xl border px-3 py-3 text-sm font-semibold transition-all ${
                           formData.time === slot
-                            ? "border-action bg-action text-white shadow-[0_12px_26px_rgba(216,90,48,0.3)]"
-                            : "border-outline-variant bg-surface-lowest text-primary hover:border-action/50 disabled:cursor-not-allowed disabled:opacity-45"
+                            ? "border-2 border-action bg-[#fdf2ec] text-action"
+                            : "border-[#cfc7ba] bg-white text-primary hover:border-action/50 disabled:cursor-not-allowed disabled:opacity-45"
                         }`}
                       >
                         {slot}
@@ -499,7 +555,7 @@ export default function QuizForm() {
 
             {step === 6 && (
               <div className="grid gap-5">
-                <div className="rounded-[1.6rem] border border-action/20 bg-action/10 p-5">
+                <div className="rounded-2xl border border-action/20 bg-[#fdf2ec] p-5">
                   <p className="text-xs font-bold uppercase tracking-[0.24em] text-action">Resumo do atendimento</p>
                   <div className="mt-4 grid gap-3 text-sm text-primary md:grid-cols-2">
                     <div>
@@ -523,7 +579,7 @@ export default function QuizForm() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 rounded-[1.6rem] border border-outline-variant bg-white/85 p-5">
+                <div className="grid gap-4 rounded-2xl border border-[#e3ddd2] bg-white p-5">
                   <div>
                     <label className="text-xs font-bold uppercase tracking-[0.24em] text-action">Nome completo</label>
                     <input
@@ -532,7 +588,7 @@ export default function QuizForm() {
                       value={formData.name}
                       onChange={(event) => updateField("name", event.target.value)}
                       placeholder="Quem vai participar do atendimento?"
-                      className="mt-3 w-full rounded-2xl border border-outline-variant bg-surface-lowest px-4 py-4 text-sm text-primary outline-none transition-colors placeholder:text-outline focus:border-action"
+                      className="mt-3 w-full rounded-2xl border border-[#cfc7ba] bg-[#fbfaf7] px-4 py-4 text-sm text-primary outline-none transition-colors placeholder:text-outline focus:border-action"
                     />
                   </div>
 
@@ -544,7 +600,7 @@ export default function QuizForm() {
                       value={formData.phone}
                       onChange={(event) => updateField("phone", event.target.value)}
                       placeholder="DDD + número para confirmação"
-                      className="mt-3 w-full rounded-2xl border border-outline-variant bg-surface-lowest px-4 py-4 text-sm text-primary outline-none transition-colors placeholder:text-outline focus:border-action"
+                      className="mt-3 w-full rounded-2xl border border-[#cfc7ba] bg-[#fbfaf7] px-4 py-4 text-sm text-primary outline-none transition-colors placeholder:text-outline focus:border-action"
                     />
                   </div>
 
@@ -559,42 +615,48 @@ export default function QuizForm() {
               </div>
             )}
           </div>
+        </div>
 
-          <div className="mt-8 flex flex-col gap-4 border-t border-outline-variant pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-8 flex items-center justify-between border-t border-[#e3ddd2] pt-5">
+          <button
+            type="button"
+            onClick={previousStep}
+            className={`inline-flex items-center gap-2 text-sm font-medium text-outline transition-colors ${
+              step === 1 ? "pointer-events-none opacity-0" : "hover:text-primary"
+            }`}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar
+          </button>
+
+          <span className="text-xs uppercase tracking-[0.18em] text-outline">
+            Passo {step} de {TOTAL_STEPS}
+          </span>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          {step < TOTAL_STEPS ? (
             <button
               type="button"
-              onClick={previousStep}
-              className={`inline-flex items-center gap-2 text-sm font-semibold text-outline transition-colors ${
-                step === 1 ? "pointer-events-none opacity-0" : "hover:text-primary"
-              }`}
+              onClick={nextStep}
+              disabled={!canAdvance}
+              className="inline-flex items-center justify-center gap-3 rounded-xl bg-action px-5 py-3 text-sm font-semibold text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <ArrowLeft className="h-4 w-4" />
-              Voltar
+              Continuar
+              <ArrowRight className="h-4 w-4" />
             </button>
-
-            {step < TOTAL_STEPS ? (
-              <button
-                type="button"
-                onClick={nextStep}
-                disabled={!canAdvance}
-                className="inline-flex items-center justify-center gap-3 rounded-full bg-primary px-6 py-3 text-xs font-bold uppercase tracking-[0.22em] text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                Continuar
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!canAdvance || isSubmitting}
-                className="inline-flex items-center justify-center gap-3 rounded-full bg-action px-6 py-3 text-xs font-bold uppercase tracking-[0.22em] text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {isSubmitting ? "Confirmando..." : "Confirmar atendimento"}
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </motion.form>
-      </div>
+          ) : (
+            <button
+              type="submit"
+              disabled={!canAdvance || isSubmitting}
+              className="inline-flex items-center justify-center gap-3 rounded-xl bg-action px-5 py-3 text-sm font-semibold text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {isSubmitting ? "Confirmando..." : "Confirmar atendimento"}
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </motion.form>
     </section>
   );
 }
